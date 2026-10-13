@@ -13,7 +13,6 @@ export interface StoredUser {
   id?: number
   username: string
   nickname: string
-  deptName?: string
   roles?: string[]
   permissions?: string[]
 }

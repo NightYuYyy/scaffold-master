@@ -5,7 +5,7 @@ import Icon from '@/components/Icon.vue'
 const props = withDefaults(defineProps<{
   modelValue?: string | number | null
   placeholder?: string
-  type?: 'text' | 'password' | 'number' | 'email' | 'tel'
+  type?: 'text' | 'password' | 'number' | 'email' | 'tel' | 'date'
   icon?: string
   invalid?: boolean
   disabled?: boolean

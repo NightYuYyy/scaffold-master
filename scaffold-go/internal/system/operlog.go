@@ -17,10 +17,10 @@ func NewOperationLogRecorder(db *sql.DB) *OperationLogRecorder { return &Operati
 func (r *OperationLogRecorder) Record(ctx context.Context, e framework.OperationLogEntry) {
 	_, err := framework.Exec(context.WithoutCancel(ctx), r.db, `
 		INSERT INTO sys_oper_log (module, action, request_method, request_url, request_params,
-		    oper_name, dept_name, ip, location, cost, result, error_msg)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    oper_name, ip, location, cost, result, error_msg)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.Module, e.Action, e.RequestMethod, e.RequestURL, e.RequestParams,
-		e.Operator, nil, e.IP, location(e.IP), e.Cost, e.Result, e.ErrorMessage)
+		e.Operator, e.IP, location(e.IP), e.Cost, e.Result, e.ErrorMessage)
 	if err != nil {
 		log.Printf("操作日志写入失败: %v", err)
 	}

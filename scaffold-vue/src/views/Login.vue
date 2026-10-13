@@ -89,10 +89,10 @@ async function playSuccess() {
 }
 
 const CAPABILITIES = [
-  { icon: 'role', title: '角色与按钮权限', desc: '菜单、按钮两级授权，前后端同一套权限码' },
-  { icon: 'layers', title: '数据权限', desc: '全部 / 本部门及下级 / 本部门 / 本人' },
-  { icon: 'log', title: '操作审计', desc: '登录日志与操作日志自动记录' },
-  { icon: 'code', title: '代码生成', desc: '导入数据表，生成业务模块开发骨架' },
+  { icon: 'layers', title: '应用接入', desc: '注册应用、签发接口密钥，开放接口即刻可用' },
+  { icon: 'users', title: '用户注册登录', desc: '各应用的终端用户按应用隔离，令牌可内省可撤销' },
+  { icon: 'sliders', title: '扩展字段与数值账户', desc: '按应用配置资料字段；积分、余额原子加减有流水' },
+  { icon: 'log', title: '审计', desc: '认证日志、账户流水与后台操作日志自动记录' },
 ]
 
 async function refreshCaptcha() {
@@ -213,12 +213,12 @@ onBeforeUnmount(() => {
 
       <div class="canvas-main">
         <div class="canvas-copy">
-          <span class="eyebrow hero-line">通用后台底座 · {{ APP.version }}</span>
+          <span class="eyebrow hero-line">用户中心平台 · {{ APP.version }}</span>
           <h1 class="login-title">
-            <span class="hero-line">统一的后台底座，</span>
-            <span class="hero-line">专注业务本身。</span>
+            <span class="hero-line">一处接入，</span>
+            <span class="hero-line">所有应用共用用户体系。</span>
           </h1>
-          <p class="login-lead hero-line">用户、角色、菜单、部门、字典与审计开箱即用，新业务模块只需关注字段与流程。</p>
+          <p class="login-lead hero-line">应用接入、用户注册登录、扩展字段、数值账户与审计开箱即用，业务后端只需调用开放接口。</p>
         </div>
 
         <!-- 实时时钟：秒针对应的刻度点亮，逐秒推进（导 Conduct） -->

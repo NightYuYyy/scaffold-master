@@ -26,8 +26,20 @@ func TestUserAndRoleListsReturnFrontendFields(t *testing.T) {
 	if user["username"] != "admin" {
 		t.Errorf("username = %v", user["username"])
 	}
-	if missing := hasKeys(user, "nickname", "deptName", "postName", "roleName", "lastLogin"); len(missing) > 0 {
+	if missing := hasKeys(user, "nickname", "appIds", "appNames", "roleName", "lastLogin"); len(missing) > 0 {
 		t.Errorf("user missing %v: %v", missing, user)
+	}
+	// 未绑定应用的账号：appIds 为空数组而不是 null，appNames 为空串
+	if !emptyList(user["appIds"]) {
+		t.Errorf("admin appIds = %v, want []", user["appIds"])
+	}
+	if user["appNames"] != "" {
+		t.Errorf("admin appNames = %v, want \"\"", user["appNames"])
+	}
+	for _, gone := range []string{"deptName", "postName"} {
+		if _, ok := user[gone]; ok {
+			t.Errorf("user still exposes %q: %v", gone, user)
+		}
 	}
 
 	roles := get(t, "/api/system/roles?pageNum=1&pageSize=10&keyword=admin", token)
@@ -48,24 +60,8 @@ func TestUserAndRoleListsReturnFrontendFields(t *testing.T) {
 	if num(role["userCount"]) < 1 {
 		t.Errorf("userCount = %v, want >= 1", role["userCount"])
 	}
-}
-
-func TestUsersListFiltersByPostId(t *testing.T) {
-	// 种子数据 sys_user_post 仅 (1,3),(2,5),(3,6)：岗位 3 下只有 admin
-	r := get(t, "/api/system/users?pageNum=1&pageSize=10&postId=3", loginAsAdmin(t))
-	if r.Status != 200 {
-		t.Fatalf("status %d: %s", r.Status, r.Raw)
-	}
-	page := okData(t, r)
-	if num(page["total"]) != 1 {
-		t.Errorf("total = %v, want 1", page["total"])
-	}
-	rows := r.Rows()
-	if len(rows) == 0 {
-		t.Fatalf("rows empty")
-	}
-	if rows[0]["username"] != "admin" {
-		t.Errorf("username = %v", rows[0]["username"])
+	if _, ok := role["dataScope"]; ok {
+		t.Errorf("role still exposes dataScope: %v", role)
 	}
 }
 
@@ -85,7 +81,7 @@ func TestPermissionGraphReturnsRolesMenusAndUserRoleLinks(t *testing.T) {
 	if len(roles) == 0 {
 		t.Fatalf("roles empty")
 	}
-	if missing := hasKeys(roles[0], "id", "name", "dataScope", "builtin", "userCount", "menuIds"); len(missing) > 0 {
+	if missing := hasKeys(roles[0], "id", "name", "builtin", "userCount", "menuIds"); len(missing) > 0 {
 		t.Errorf("roles[0] missing %v: %v", missing, roles[0])
 	}
 	menus := asMaps(list(graph, "menus"))
@@ -122,7 +118,7 @@ func TestPermissionGraphRequiresLogin(t *testing.T) {
 	}
 }
 
-func TestMenuAndDeptApisReturnTreeStructures(t *testing.T) {
+func TestMenuApiReturnsTreeStructure(t *testing.T) {
 	token := loginAsAdmin(t)
 
 	menus := get(t, "/api/system/menus/tree", token)
@@ -131,7 +127,7 @@ func TestMenuAndDeptApisReturnTreeStructures(t *testing.T) {
 	}
 	menuTree := okList(t, menus)
 	paths := pluck(menuTree, "path")
-	for _, p := range []string{"/dashboard", "/system"} {
+	for _, p := range []string{"/dashboard", "/platform", "/system"} {
 		if !containsString(paths, p) {
 			t.Errorf("menu paths %v lack %s", paths, p)
 		}
@@ -153,21 +149,10 @@ func TestMenuAndDeptApisReturnTreeStructures(t *testing.T) {
 		}
 	}
 
-	depts := get(t, "/api/system/depts/tree", token)
-	if depts.Status != 200 {
-		t.Fatalf("depts status %d: %s", depts.Status, depts.Raw)
-	}
-	deptTree := okList(t, depts)
-	if !containsString(pluck(deptTree, "name"), "云原科技集团") {
-		t.Errorf("dept tree lacks 云原科技集团: %v", deptTree)
-	}
-	if len(deptTree) == 0 {
-		t.Fatalf("dept tree empty")
-	}
-	childNames := pluck(asMaps(list(deptTree[0], "children")), "name")
-	for _, n := range []string{"研发中心", "产品中心"} {
-		if !containsString(childNames, n) {
-			t.Errorf("dept children %v lack %s", childNames, n)
+	// 部门 / 岗位接口已随用户中心改造移除
+	for _, path := range []string{"/api/system/depts/tree", "/api/system/posts"} {
+		if r := get(t, path, token); r.Status != http.StatusNotFound {
+			t.Errorf("%s status %d, want 404: %s", path, r.Status, r.Raw)
 		}
 	}
 }
@@ -179,16 +164,16 @@ func TestDictionaryConfigAndLogApisReturnData(t *testing.T) {
 	if dictTypes.Status != 200 {
 		t.Fatalf("dict types status %d: %s", dictTypes.Status, dictTypes.Raw)
 	}
-	if types := pluck(okRows(t, dictTypes), "dictType"); !containsString(types, "sys_user_sex") {
-		t.Errorf("dict types %v lack sys_user_sex", types)
+	if types := pluck(okRows(t, dictTypes), "dictType"); !containsString(types, "sys_yes_no") {
+		t.Errorf("dict types %v lack sys_yes_no", types)
 	}
 
-	dictData := get(t, "/api/system/dict/data/sys_user_sex", token)
+	dictData := get(t, "/api/system/dict/data/sys_yes_no", token)
 	if dictData.Status != 200 {
 		t.Fatalf("dict data status %d: %s", dictData.Status, dictData.Raw)
 	}
 	labels := pluck(okList(t, dictData), "label")
-	for _, l := range []string{"男", "女"} {
+	for _, l := range []string{"是", "否"} {
 		if !containsString(labels, l) {
 			t.Errorf("labels %v lack %s", labels, l)
 		}

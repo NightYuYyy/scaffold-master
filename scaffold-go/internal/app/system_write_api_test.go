@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// writeCreateUser 对应 createUser(headers, suffix, username, nickname)。
+// writeCreateUser 对应 createUser(headers, suffix, username, nickname)：角色 4（审计专员），绑定示例应用 1。
 func writeCreateUser(t testing.TB, token, username, nickname string) int64 {
 	t.Helper()
 	create := post(t, "/api/system/users", token, map[string]any{
@@ -17,10 +17,9 @@ func writeCreateUser(t testing.TB, token, username, nickname string) int64 {
 		"password": "admin123",
 		"phone":    "",
 		"email":    username + "@example.com",
-		"deptId":   6,
 		"status":   1,
 		"roleIds":  []int{4},
-		"postIds":  []int{6},
+		"appIds":   []int{1},
 	})
 	if create.Status != 200 {
 		t.Fatalf("create user status %d: %s", create.Status, create.Raw)
@@ -28,8 +27,15 @@ func writeCreateUser(t testing.TB, token, username, nickname string) int64 {
 	return num(okData(t, create)["id"])
 }
 
+// userAppCount 当前账号在 sys_user_app 中的绑定数。
+func userAppCount(t testing.TB, userID int64) int64 {
+	t.Helper()
+	return queryInt64(t, "SELECT COUNT(*) FROM sys_user_app WHERE user_id = ?", userID)
+}
+
 func TestBackendPermissionAnnotationRejectsUserWithoutPermission(t *testing.T) {
-	token := login(t, "chensy", "admin123")
+	// 种子账号 appadmin 为应用管理员，没有 system:user:list
+	token := login(t, "appadmin", "admin123")
 
 	r := get(t, "/api/system/users", token)
 
@@ -44,47 +50,6 @@ func TestBackendPermissionAnnotationRejectsUserWithoutPermission(t *testing.T) {
 	}
 }
 
-func TestPostCrudPersistsAndSoftDeletesRecord(t *testing.T) {
-	suffix := uniqueSuffix()
-	token := loginAsAdmin(t)
-
-	create := post(t, "/api/system/posts", token, map[string]any{
-		"postCode": "qa_" + suffix,
-		"postName": "测试岗位" + suffix,
-		"sort":     99,
-		"status":   1,
-		"remark":   "集成测试创建",
-	})
-	if create.Status != 200 {
-		t.Fatalf("create status %d: %s", create.Status, create.Raw)
-	}
-	id := itoa(num(okData(t, create)["id"]))
-
-	update := put(t, "/api/system/posts/"+id, token, map[string]any{"postName": "测试岗位已更新" + suffix, "sort": 100, "status": 0, "remark": "已更新"})
-	if update.Status != 200 {
-		t.Fatalf("update status %d: %s", update.Status, update.Raw)
-	}
-
-	rows := okRows(t, get(t, "/api/system/posts?pageNum=1&pageSize=10&keyword="+suffix, token))
-	if len(rows) == 0 {
-		t.Fatalf("post list empty")
-	}
-	if rows[0]["postName"] != "测试岗位已更新"+suffix {
-		t.Errorf("postName = %v", rows[0]["postName"])
-	}
-	if num(rows[0]["status"]) != 0 {
-		t.Errorf("status = %v, want 0", rows[0]["status"])
-	}
-
-	if r := del(t, "/api/system/posts/"+id, token); r.Status != 200 {
-		t.Fatalf("delete status %d: %s", r.Status, r.Raw)
-	}
-
-	if after := okRows(t, get(t, "/api/system/posts?pageNum=1&pageSize=10&keyword="+suffix, token)); len(after) != 0 {
-		t.Errorf("rows after delete = %v", after)
-	}
-}
-
 func TestUserCrudPersistsAssignmentsAndSoftDeletesRecord(t *testing.T) {
 	suffix := uniqueSuffix()
 	token := loginAsAdmin(t)
@@ -95,41 +60,74 @@ func TestUserCrudPersistsAssignmentsAndSoftDeletesRecord(t *testing.T) {
 		"password": "admin123",
 		"phone":    "",
 		"email":    "it_" + suffix + "@example.com",
-		"deptId":   6,
 		"status":   1,
 		"roleIds":  []int{4},
-		"postIds":  []int{6},
+		"appIds":   []int{1},
 	})
 	if create.Status != 200 {
 		t.Fatalf("create status %d: %s", create.Status, create.Raw)
 	}
-	id := itoa(num(okData(t, create)["id"]))
-
-	update := put(t, "/api/system/users/"+id, token, map[string]any{
-		"nickname": "集成测试用户已更新" + suffix, "deptId": 7, "status": 0, "roleIds": []int{5}, "postIds": []int{7},
-	})
-	if update.Status != 200 {
-		t.Fatalf("update status %d: %s", update.Status, update.Raw)
+	userID := num(okData(t, create)["id"])
+	id := itoa(userID)
+	if n := userAppCount(t, userID); n != 1 {
+		t.Errorf("sys_user_app rows after create = %d, want 1", n)
 	}
 
 	rows := okRows(t, get(t, "/api/system/users?pageNum=1&pageSize=10&keyword="+suffix, token))
 	if len(rows) == 0 {
 		t.Fatalf("user list empty")
 	}
+	if ids := list(rows[0], "appIds"); len(ids) != 1 || num(ids[0]) != 1 {
+		t.Errorf("appIds = %v, want [1]", rows[0]["appIds"])
+	}
+	if rows[0]["appNames"] != "示例应用" {
+		t.Errorf("appNames = %v, want 示例应用", rows[0]["appNames"])
+	}
+	if roleName, _ := rows[0]["roleName"].(string); !strings.Contains(roleName, "审计专员") {
+		t.Errorf("roleName = %v, want 审计专员", rows[0]["roleName"])
+	}
+
+	// 更新：清空应用绑定、换角色、停用
+	update := put(t, "/api/system/users/"+id, token, map[string]any{
+		"nickname": "集成测试用户已更新" + suffix, "status": 0, "roleIds": []int{3}, "appIds": []int{},
+	})
+	if update.Status != 200 {
+		t.Fatalf("update status %d: %s", update.Status, update.Raw)
+	}
+	if n := userAppCount(t, userID); n != 0 {
+		t.Errorf("sys_user_app rows after clearing = %d, want 0", n)
+	}
+	rows = okRows(t, get(t, "/api/system/users?pageNum=1&pageSize=10&keyword="+suffix, token))
+	if len(rows) == 0 {
+		t.Fatalf("user list empty after update")
+	}
 	if rows[0]["nickname"] != "集成测试用户已更新"+suffix {
 		t.Errorf("nickname = %v", rows[0]["nickname"])
 	}
-	if rows[0]["deptName"] != "测试质量部" {
-		t.Errorf("deptName = %v", rows[0]["deptName"])
+	if !emptyList(rows[0]["appIds"]) || rows[0]["appNames"] != "" {
+		t.Errorf("appIds/appNames after clearing = %v / %v, want [] / \"\"", rows[0]["appIds"], rows[0]["appNames"])
 	}
 	if num(rows[0]["status"]) != 0 {
 		t.Errorf("status = %v, want 0", rows[0]["status"])
 	}
 
+	// 不传 appIds 时保持原绑定；再次绑定后删除账号要连带清掉 sys_user_app
+	if r := put(t, "/api/system/users/"+id, token, map[string]any{"appIds": []int{1}}); r.Status != 200 {
+		t.Fatalf("rebind status %d: %s", r.Status, r.Raw)
+	}
+	if r := put(t, "/api/system/users/"+id, token, map[string]any{"nickname": "再次更新" + suffix}); r.Status != 200 {
+		t.Fatalf("update without appIds status %d: %s", r.Status, r.Raw)
+	}
+	if n := userAppCount(t, userID); n != 1 {
+		t.Errorf("sys_user_app rows after rebind = %d, want 1", n)
+	}
+
 	if r := del(t, "/api/system/users/"+id, token); r.Status != 200 {
 		t.Fatalf("delete status %d: %s", r.Status, r.Raw)
 	}
-
+	if n := userAppCount(t, userID); n != 0 {
+		t.Errorf("sys_user_app rows after delete = %d, want 0", n)
+	}
 	if after := okRows(t, get(t, "/api/system/users?pageNum=1&pageSize=10&keyword="+suffix, token)); len(after) != 0 {
 		t.Errorf("rows after delete = %v", after)
 	}
@@ -140,12 +138,11 @@ func TestSoftDeletedUserDoesNotBlockRoleDeletion(t *testing.T) {
 	token := loginAsAdmin(t)
 
 	role := post(t, "/api/system/roles", token, map[string]any{
-		"name":      "软删用户角色" + suffix,
-		"code":      "soft_user_role_" + suffix,
-		"dataScope": "SELF",
-		"sort":      99,
-		"status":    1,
-		"menuIds":   []int{101},
+		"name":    "软删用户角色" + suffix,
+		"code":    "soft_user_role_" + suffix,
+		"sort":    99,
+		"status":  1,
+		"menuIds": []int{201},
 	})
 	if role.Status != 200 {
 		t.Fatalf("role create status %d: %s", role.Status, role.Raw)
@@ -156,10 +153,9 @@ func TestSoftDeletedUserDoesNotBlockRoleDeletion(t *testing.T) {
 		"username": "soft_role_" + suffix,
 		"nickname": "软删角色用户" + suffix,
 		"password": "admin123",
-		"deptId":   6,
 		"status":   1,
 		"roleIds":  []int64{roleID},
-		"postIds":  []int{6},
+		"appIds":   []int{1},
 	})
 	if user.Status != 200 {
 		t.Fatalf("user create status %d: %s", user.Status, user.Raw)
@@ -219,10 +215,10 @@ func TestUserStatusPasswordAndExportApisWork(t *testing.T) {
 	if cd := export.Header.Get("Content-Disposition"); !strings.Contains(cd, "users") {
 		t.Errorf("Content-Disposition = %q", cd)
 	}
-	if !strings.Contains(export.Raw, "登录账号,用户昵称,手机号,邮箱,部门,岗位,角色,状态,创建时间,最近登录") {
+	if !strings.Contains(export.Raw, "登录账号,用户昵称,手机号,邮箱,可管理应用,角色,状态,创建时间,最近登录") {
 		t.Errorf("export lacks header: %s", export.Raw)
 	}
-	if !strings.Contains(export.Raw, username) {
-		t.Errorf("export lacks %s: %s", username, export.Raw)
+	if !strings.Contains(export.Raw, username+",用户增强测试"+suffix+",,"+username+"@example.com,示例应用,审计专员,正常,") {
+		t.Errorf("export lacks row with bound app: %s", export.Raw)
 	}
 }

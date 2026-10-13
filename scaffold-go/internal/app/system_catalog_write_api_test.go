@@ -18,12 +18,11 @@ func TestRoleCrudPersistsAndSoftDeletesRecord(t *testing.T) {
 	token := loginAsAdmin(t)
 
 	create := post(t, "/api/system/roles", token, map[string]any{
-		"name":      "集成测试角色" + suffix,
-		"code":      "it_role_" + suffix,
-		"dataScope": "SELF",
-		"sort":      88,
-		"status":    1,
-		"remark":    "集成测试创建",
+		"name":   "集成测试角色" + suffix,
+		"code":   "it_role_" + suffix,
+		"sort":   88,
+		"status": 1,
+		"remark": "集成测试创建",
 	})
 	if create.Status != 200 {
 		t.Fatalf("create status %d: %s", create.Status, create.Raw)
@@ -31,11 +30,10 @@ func TestRoleCrudPersistsAndSoftDeletesRecord(t *testing.T) {
 	id := itoa(idOf(t, create))
 
 	update := put(t, "/api/system/roles/"+id, token, map[string]any{
-		"name":      "集成测试角色已更新" + suffix,
-		"dataScope": "CUSTOM",
-		"sort":      89,
-		"status":    0,
-		"remark":    "已更新",
+		"name":   "集成测试角色已更新" + suffix,
+		"sort":   89,
+		"status": 0,
+		"remark": "已更新",
 	})
 	if update.Status != 200 {
 		t.Fatalf("update status %d: %s", update.Status, update.Raw)
@@ -49,8 +47,11 @@ func TestRoleCrudPersistsAndSoftDeletesRecord(t *testing.T) {
 	if role["name"] != "集成测试角色已更新"+suffix {
 		t.Errorf("name = %v", role["name"])
 	}
-	if role["dataScope"] != "自定义数据权限" {
-		t.Errorf("dataScope = %v", role["dataScope"])
+	if num(role["status"]) != 0 {
+		t.Errorf("status = %v, want 0", role["status"])
+	}
+	if _, ok := role["dataScope"]; ok {
+		t.Errorf("role still exposes dataScope: %v", role)
 	}
 
 	if r := del(t, "/api/system/roles/"+id, token); r.Status != 200 {
@@ -61,38 +62,12 @@ func TestRoleCrudPersistsAndSoftDeletesRecord(t *testing.T) {
 	}
 }
 
-func TestDeptAndMenuCrudPersistAndDeleteRecords(t *testing.T) {
+func TestMenuCrudPersistsAndDeletesRecord(t *testing.T) {
 	suffix := uniqueSuffix()
 	token := loginAsAdmin(t)
 
-	deptCreate := post(t, "/api/system/depts", token, map[string]any{
-		"parentId": 1,
-		"name":     "集成测试部门" + suffix,
-		"leader":   "测试负责人",
-		"phone":    "",
-		"email":    "dept_" + suffix + "@example.com",
-		"sort":     90,
-		"status":   1,
-	})
-	if deptCreate.Status != 200 {
-		t.Fatalf("dept create status %d: %s", deptCreate.Status, deptCreate.Raw)
-	}
-	deptID := itoa(idOf(t, deptCreate))
-
-	deptUpdate := put(t, "/api/system/depts/"+deptID, token, map[string]any{
-		"name":   "集成测试部门已更新" + suffix,
-		"leader": "新负责人",
-		"status": 0,
-	})
-	if deptUpdate.Status != 200 {
-		t.Fatalf("dept update status %d: %s", deptUpdate.Status, deptUpdate.Raw)
-	}
-	if r := del(t, "/api/system/depts/"+deptID, token); r.Status != 200 {
-		t.Fatalf("dept delete status %d: %s", r.Status, r.Raw)
-	}
-
 	menuCreate := post(t, "/api/system/menus", token, map[string]any{
-		"parentId":   100,
+		"parentId":   200,
 		"name":       "集成测试菜单" + suffix,
 		"type":       "menu",
 		"icon":       "menu",

@@ -96,7 +96,7 @@ function entriesOf(idx: PermissionIndex, kind: Kind): Entry[] {
       .sort((a, b) => (idx.rolesOfUser.get(b.id)?.length ?? 0) - (idx.rolesOfUser.get(a.id)?.length ?? 0))
       .map((u) => {
         const roles = idx.rolesOfUser.get(u.id)?.length ?? 0
-        return { id: `user:${u.id}`, label: u.nickname, sub: roles ? `${u.deptName ?? '未分配部门'} · ${roles} 个角色` : '未分配角色', tone: u.status !== 1 ? 'off' : roles ? undefined : 'danger' }
+        return { id: `user:${u.id}`, label: u.nickname, sub: roles ? `@${u.username} · ${roles} 个角色` : '未分配角色', tone: u.status !== 1 ? 'off' : roles ? undefined : 'danger' }
       })
   }
   return idx.graph.menus.filter(m => m.type === 'menu').map((m) => {
@@ -234,7 +234,7 @@ const scene = computed<{ nodes: GraphNode[]; links: GraphLink[] }>(() => {
     nodes.push({ id: center, x: W * 0.47, y: cy, label: role.name, sub: role.code, kind: 'item', icon: 'role', cat: CAT.role, count: `${userIds.length} 人`, tone: role.status === 1 ? undefined : 'off' })
     nodes.push(...column(userIds, W * 0.2, H, (id, y, i, n) => {
       const u = idx.user.get(id)
-      return { id: `user:${id}`, x: W * 0.2, y, label: u?.nickname ?? `用户 ${id}`, sub: u?.deptName ?? '', kind: 'item', align: 'right', cat: CAT.user, tone: u?.status === 0 ? 'off' : undefined, from: center, delay: stagger(i, n, 0.1) }
+      return { id: `user:${id}`, x: W * 0.2, y, label: u?.nickname ?? `用户 ${id}`, sub: u ? `@${u.username}` : '', kind: 'item', align: 'right', cat: CAT.user, tone: u?.status === 0 ? 'off' : undefined, from: center, delay: stagger(i, n, 0.1) }
     }, 'more:user', 'right'))
     nodes.push(...column(pages(idx, granted), W * 0.74, H, (m, y, i, n) => {
       const btns = buttonsUnder(idx, m.id, granted).length
@@ -252,7 +252,7 @@ const scene = computed<{ nodes: GraphNode[]; links: GraphLink[] }>(() => {
     const center = `user:${user.id}`
     const roleIds = idx.rolesOfUser.get(user.id) ?? []
     const menuIds = menusOfUser(idx, user.id)
-    nodes.push({ id: center, x: W * 0.14, y: cy, label: user.nickname, sub: user.deptName ?? user.username, kind: 'item', icon: 'user', cat: CAT.user, count: `${roleIds.length} 角色`, tone: user.status === 1 ? undefined : 'off' })
+    nodes.push({ id: center, x: W * 0.14, y: cy, label: user.nickname, sub: `@${user.username}`, kind: 'item', icon: 'user', cat: CAT.user, count: `${roleIds.length} 角色`, tone: user.status === 1 ? undefined : 'off' })
     nodes.push(...column(roleIds, W * 0.42, H, (id, y, i, n) => {
       const r = idx.role.get(id)
       return { id: `role:${id}`, x: W * 0.42, y, label: r?.name ?? `角色 ${id}`, sub: r?.code, kind: 'item', cat: CAT.role, tone: roleActive(r) ? undefined : 'off', from: center, delay: stagger(i, n, 0.1) }
@@ -278,7 +278,7 @@ const scene = computed<{ nodes: GraphNode[]; links: GraphLink[] }>(() => {
   const orphan = !roles.some(r => !isSuperRole(r))
   nodes.push({ id: center, x: W * 0.76, y: cy, label: menu.name, sub: menu.permission ?? menu.path ?? menu.type, kind: 'item', icon: menu.type === 'btn' ? 'key' : 'menu', cat: CAT.menu, count: `${roles.length} 角色`, tone: orphan ? 'danger' : menu.status === 1 ? undefined : 'off' })
   nodes.push(...column(roles, W * 0.48, H, (r, y, i, n) => ({ id: `role:${r.id}`, x: W * 0.48, y, label: r.name, sub: r.code, kind: 'item', cat: CAT.role, from: center, delay: stagger(i, n, 0.1) }), 'more:role', 'center'))
-  nodes.push(...column(users, W * 0.2, H, (u, y, i, n) => ({ id: `user:${u.id}`, x: W * 0.2, y, label: u.nickname, sub: u.deptName ?? '', kind: 'item', align: 'right', cat: CAT.user, tone: u.status === 1 ? undefined : 'off', from: center, delay: stagger(i, n, 0.35) }), 'more:user', 'right'))
+  nodes.push(...column(users, W * 0.2, H, (u, y, i, n) => ({ id: `user:${u.id}`, x: W * 0.2, y, label: u.nickname, sub: `@${u.username}`, kind: 'item', align: 'right', cat: CAT.user, tone: u.status === 1 ? undefined : 'off', from: center, delay: stagger(i, n, 0.35) }), 'more:user', 'right'))
   const shown = new Set(nodes.map(n => n.id))
   roles.forEach((r) => {
     if (!shown.has(`role:${r.id}`)) return
@@ -326,7 +326,7 @@ const panel = computed(() => {
   const idx = index.value
   const f = parsed.value
   if (!idx || !f) return null
-  const chipUser = (id: number): InsightChip | null => { const u = idx.user.get(id); return u ? { id: `user:${u.id}`, label: u.nickname, sub: u.deptName ?? '', cat: CAT.user, tone: u.status === 1 ? undefined : 'off' } : null }
+  const chipUser = (id: number): InsightChip | null => { const u = idx.user.get(id); return u ? { id: `user:${u.id}`, label: u.nickname, sub: `@${u.username}`, cat: CAT.user, tone: u.status === 1 ? undefined : 'off' } : null }
   const chipRole = (id: number): InsightChip | null => { const r = idx.role.get(id); return r ? { id: `role:${r.id}`, label: r.name, sub: r.code, cat: CAT.role, tone: r.status === 1 ? undefined : 'off' } : null }
   const chipMenu = (m: GraphMenu): InsightChip => ({ id: `menu:${m.id}`, label: m.name, sub: m.permission ?? '', cat: CAT.menu, tone: m.status === 1 ? undefined : 'off' })
   const cap = <T,>(list: T[], n = 24) => ({ chips: list.slice(0, n), more: Math.max(0, list.length - n) })
@@ -346,7 +346,7 @@ const panel = computed(() => {
     if (lonely.length && !isSuperRole(role)) insights.push({ tone: 'info', title: '独占授权', text: `${lonely.map(m => m.name).slice(0, 4).join('、')}${lonely.length > 4 ? ' 等' : ''} 仅由该角色授予，删除角色将导致无人可访问。` })
     return {
       key: focus.value!, kind: '角色', kindIcon: 'role', cat: CAT.role, title: role.name, subtitle: role.code,
-      status: `${role.dataScope} · ${role.builtin ? '内置角色' : '自定义角色'}`,
+      status: role.builtin ? '内置角色' : '自定义角色',
       metric: { label: '授予页面', value: pageList.length, unit: '个', bars: pageList.map(m => buttonsUnder(idx, m.id, granted).length + 1) },
       tiles: [{ label: '按钮权限', value: btns }, { label: '持有用户', value: idx.graph.usersVisible ? users.length : role.userCount }, { label: '状态', value: role.status === 1 ? '正常' : '停用' }] as InsightTile[],
       insights,
@@ -365,13 +365,13 @@ const panel = computed(() => {
     const active = roleIds.filter(id => roleActive(idx.role.get(id)))
     const insights: InsightCard[] = []
     if (!roleIds.length) insights.push({ tone: 'warn', title: '未分配角色', text: '该用户登录后看不到任何菜单。' })
-    if (active.length >= 3) insights.push({ tone: 'warn', title: '多角色叠加', text: `同时持有 ${active.length} 个启用角色，权限可能超出岗位需要。` })
+    if (active.length >= 3) insights.push({ tone: 'warn', title: '多角色叠加', text: `同时持有 ${active.length} 个启用角色，权限可能超出实际需要。` })
     if (roleIds.length > active.length) insights.push({ tone: 'info', title: '含停用角色', text: `${roleIds.length - active.length} 个角色已停用，不提供权限。` })
     if (user.status !== 1) insights.push({ tone: 'danger', title: '账号已停用', text: '账号无法登录，以上权限暂不生效。' })
     if (active.some(id => isSuperRole(idx.role.get(id)))) insights.push({ tone: 'info', title: '超级管理员', text: '拥有全部菜单与按钮权限。' })
     return {
       key: focus.value!, kind: '用户', kindIcon: 'user', cat: CAT.user, title: user.nickname, subtitle: `@${user.username}`,
-      status: user.deptName ? `所属部门：${user.deptName}` : '未分配部门',
+      status: user.status === 1 ? '后台账号 · 正常' : '后台账号 · 已停用',
       metric: { label: '可访问页面', value: pageList.length, unit: '个', bars: active.map(id => idx.role.get(id)?.menuIds.length ?? 0) },
       tiles: [{ label: '角色', value: roleIds.length }, { label: '按钮权限', value: btns }, { label: '状态', value: user.status === 1 ? '正常' : '停用' }] as InsightTile[],
       insights,

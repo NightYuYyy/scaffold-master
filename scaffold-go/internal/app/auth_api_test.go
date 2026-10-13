@@ -3,6 +3,7 @@ package app
 // 对应 AuthApiTest。文件顶部的 okData/okList/okRows/asMaps/pluck 为全部移植测试共用的小断言辅助。
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 )
@@ -50,6 +51,19 @@ func pluck(rows []map[string]any, key string) []any {
 	return out
 }
 
+// exactly 对应 containsExactly：元素与顺序都相同。
+func exactly(got []any, want ...string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if fmt.Sprint(got[i]) != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // hasKeys 对应 containsKeys：键存在即可（值可为 null）。
 func hasKeys(m map[string]any, keys ...string) []string {
 	var missing []string
@@ -75,7 +89,7 @@ func TestLoginReturnsTokenAndCurrentUserInfoUsesBearerToken(t *testing.T) {
 	if data["username"] != "admin" {
 		t.Errorf("username = %v", data["username"])
 	}
-	if data["nickname"] != "周明远" {
+	if data["nickname"] != "平台管理员" {
 		t.Errorf("nickname = %v", data["nickname"])
 	}
 	if !containsString(list(data, "roles"), "super_admin") {
@@ -83,6 +97,11 @@ func TestLoginReturnsTokenAndCurrentUserInfoUsesBearerToken(t *testing.T) {
 	}
 	if !containsString(list(data, "permissions"), "system:user:list") {
 		t.Errorf("permissions %v lacks system:user:list", data["permissions"])
+	}
+	for _, gone := range []string{"deptId", "deptName"} {
+		if _, ok := data[gone]; ok {
+			t.Errorf("me still exposes %q: %v", gone, data)
+		}
 	}
 }
 

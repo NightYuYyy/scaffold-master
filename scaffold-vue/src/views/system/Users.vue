@@ -2,8 +2,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { pathOf } from '@/composables/auth'
-import { Avatar, Field, HoverCard, Segmented, Select, StatusTag, Switch, Tag, TextInput, type Column } from '@/components/ui'
-import { DeptSelect, DeptTree, DictSelect, FormDialog, ListPage, PermissionButton } from '@/components/business'
+import { Avatar, Checkbox, Field, HoverCard, Segmented, Select, StatusTag, Switch, Tag, TextInput, type Column } from '@/components/ui'
+import { DictSelect, FormDialog, ListPage, PermissionButton } from '@/components/business'
 import BoardView, { type BoardColumn } from '@/components/business/BoardView.vue'
 import { systemApi, type UserRow } from '@/api'
 import { useListPage } from '@/composables/list'
@@ -11,42 +11,46 @@ import { useViewMode } from '@/composables/view'
 import { hasPermission } from '@/directives/permission'
 import { confirm } from '@/composables/confirm'
 import { pushToast, toastError } from '@/composables/toast'
-import { flattenDepts } from '@/composables/dept'
-import type { Dept } from '@/data'
 import { email, phone, required, validate } from '@/utils/validate'
 
+/* ============================================================
+   后台账号：登录运营控制台的账号。角色决定菜单与按钮；
+   「可管理的应用」决定能看到哪些应用的数据（super_admin 不受限）。
+   ============================================================ */
 const route = useRoute()
 const router = useRouter()
-/* 权限溯源：跳到角色页的溯源视图并聚焦该用户 */
+/* 权限溯源：跳到角色页的溯源视图并聚焦该账号 */
 const tracePath = computed(() => pathOf('system/role/index'))
 function openTrace(row: UserRow) {
   if (tracePath.value) router.push({ path: tracePath.value, query: { trace: `user:${row.id}` } })
 }
-const list = useListPage<UserRow, { keyword: string; status: string; deptId: number | null }>({
-  // 从命令面板选中用户时带入账号关键词
-  query: { keyword: typeof route.query.keyword === 'string' ? route.query.keyword : '', status: '', deptId: null },
+const list = useListPage<UserRow, { keyword: string; status: string }>({
+  // 从命令面板选中账号时带入账号关键词
+  query: { keyword: typeof route.query.keyword === 'string' ? route.query.keyword : '', status: '' },
   fetch: params => systemApi.users.list(params),
   exporter: params => systemApi.users.export(params),
-  exportName: '用户列表.csv',
+  exportName: '后台账号.csv',
 })
 
 const columns: Column[] = [
-  { key: 'nickname', title: '用户', minWidth: 200 },
-  { key: 'deptName', title: '部门' },
-  { key: 'postName', title: '岗位' },
+  { key: 'nickname', title: '账号', minWidth: 200 },
   { key: 'roleName', title: '角色' },
+  { key: 'appNames', title: '可管理的应用', minWidth: 160 },
   { key: 'phone', title: '手机号' },
   { key: 'status', title: '状态', width: 96 },
   { key: 'createTime', title: '创建时间', width: 150 },
   { key: 'actions', title: '操作', width: 150, className: 'col-actions' },
 ]
 
-/* ── 看板视图：按部门 / 角色 / 状态分列；只有「按状态」允许拖动（改状态是单字段接口） ── */
+const SUPER_ROLE = '超级管理员'
+const isSuper = (row: UserRow) => /超级管理员|super_admin/.test(row.roleName ?? '')
+
+/* ── 看板视图：按角色 / 状态分列；只有「按状态」允许拖动（改状态是单字段接口） ── */
 const view = useViewMode('users', 'table', ['table', 'board'] as const, 'table')
 const VIEWS = [{ label: '列表', value: 'table' as const }, { label: '看板', value: 'board' as const }]
-type GroupBy = 'dept' | 'role' | 'status'
-const groupBy = useViewMode<GroupBy>('users.group', 'dept', ['dept', 'role', 'status'] as const)
-const GROUPS = [{ label: '按部门', value: 'dept' as GroupBy }, { label: '按角色', value: 'role' as GroupBy }, { label: '按状态', value: 'status' as GroupBy }]
+type GroupBy = 'role' | 'status'
+const groupBy = useViewMode<GroupBy>('users.group', 'role', ['role', 'status'] as const)
+const GROUPS = [{ label: '按角色', value: 'role' as GroupBy }, { label: '按状态', value: 'status' as GroupBy }]
 const BOARD_LIMIT = 100 // 与后端分页上限一致
 const boardRows = ref<UserRow[]>([])
 const boardTotal = ref(0)
@@ -81,10 +85,9 @@ const boardColumns = computed<BoardColumn<UserRow>[]>(() => {
       { key: 0, title: '停用', items: rows.filter(r => r.status !== 1) },
     ]
   }
-  const field = groupBy.value === 'dept' ? 'deptName' : 'roleName'
   const groups = new Map<string, UserRow[]>()
   rows.forEach((row) => {
-    const name = row[field] || (groupBy.value === 'dept' ? '未分配部门' : '未分配角色')
+    const name = row.roleName || '未分配角色'
     groups.set(name, [...(groups.get(name) ?? []), row])
   })
   return [...groups.entries()]
@@ -111,26 +114,20 @@ async function moveStatus({ item, to }: { item: UserRow; to: BoardColumn<UserRow
 
 /* ── 选项 ── */
 const roles = ref<Array<{ id: number; name: string }>>([])
-const posts = ref<Array<{ id: number; name: string }>>([])
-const departments = ref<Dept[]>([])
+const apps = ref<Array<{ id: number; code: string; name: string }>>([])
 const initPassword = ref('')
 const roleOptions = computed(() => roles.value.map(r => ({ label: r.name, value: r.id })))
-const postOptions = computed(() => posts.value.map(p => ({ label: p.name, value: p.id })))
 
 onMounted(async () => {
   try {
     const options = await systemApi.users.options()
     roles.value = options.roles
-    posts.value = options.posts
-    departments.value = options.depts as unknown as Dept[]
+    apps.value = options.apps ?? []
     initPassword.value = options.initPassword
   } catch (error) {
-    toastError(error, '角色与岗位选项加载失败')
+    toastError(error, '角色与应用选项加载失败')
   }
 })
-
-// 左侧部门树筛选
-watch(() => list.query.deptId, () => list.search())
 
 /* ── 新增 / 编辑 ── */
 interface UserForm {
@@ -140,20 +137,21 @@ interface UserForm {
   password: string
   phone: string
   email: string
-  deptId: number | null
   roleId: number | null
-  postId: number | null
+  appIds: number[]
   status: number
 }
 const emptyForm = (): UserForm => ({
   username: '', nickname: '', password: initPassword.value, phone: '', email: '',
-  deptId: list.query.deptId, roleId: null, postId: null, status: 1,
+  roleId: null, appIds: [], status: 1,
 })
 const dialog = ref(false)
 const saving = ref(false)
 const form = reactive<UserForm>(emptyForm())
 const errors = ref<Partial<Record<keyof UserForm, string>>>({})
 const isEdit = computed(() => Boolean(form.id))
+/** 选中的角色是否超级管理员：可管理的应用对其无意义 */
+const formIsSuper = computed(() => roles.value.find(r => r.id === form.roleId)?.name === SUPER_ROLE)
 
 // 初始密码参数晚于弹窗到达时补填
 watch(initPassword, (value) => {
@@ -167,7 +165,6 @@ function openCreate() {
 }
 
 function openEdit(row: UserRow) {
-  const dept = flattenDepts(departments.value).find(d => d.dept.name === row.deptName)
   Object.assign(form, {
     id: row.id,
     username: row.username,
@@ -175,23 +172,25 @@ function openEdit(row: UserRow) {
     password: '',
     phone: row.phone ?? '',
     email: row.email ?? '',
-    deptId: dept?.dept.id ?? null,
     roleId: roles.value.find(r => r.name === row.roleName)?.id ?? null,
-    postId: posts.value.find(p => p.name === row.postName)?.id ?? null,
+    appIds: [...(row.appIds ?? [])],
     status: row.status,
   })
   errors.value = {}
   dialog.value = true
 }
 
+function toggleApp(id: number, on: boolean) {
+  form.appIds = on ? [...new Set([...form.appIds, id])] : form.appIds.filter(x => x !== id)
+}
+
 async function submit() {
   errors.value = validate(form, {
     username: [required('请输入登录账号')],
-    nickname: [required('请输入用户姓名')],
+    nickname: [required('请输入姓名')],
     password: isEdit.value ? [] : [required('请输入初始密码'), v => (String(v).length < 6 ? '密码至少 6 位' : undefined)],
     phone: [phone],
     email: [email],
-    deptId: [required('请选择所属部门')],
     roleId: [required('请选择角色')],
   })
   if (Object.keys(errors.value).length) return
@@ -201,23 +200,22 @@ async function submit() {
     nickname: form.nickname.trim(),
     phone: form.phone || undefined,
     email: form.email || undefined,
-    deptId: form.deptId ?? undefined,
     status: form.status,
     roleIds: form.roleId ? [form.roleId] : [],
-    postIds: form.postId ? [form.postId] : [],
+    appIds: formIsSuper.value ? [] : form.appIds,
   }
   try {
     if (form.id) {
       await systemApi.users.update(form.id, payload)
-      pushToast('用户信息已更新')
+      pushToast('后台账号已更新')
     } else {
       await systemApi.users.create({ ...payload, password: form.password })
-      pushToast('用户已新增')
+      pushToast('后台账号已新增')
     }
     dialog.value = false
     await list.load()
   } catch (error) {
-    toastError(error, '用户保存失败')
+    toastError(error, '后台账号保存失败')
   } finally {
     saving.value = false
   }
@@ -255,21 +253,21 @@ async function submitReset() {
 
 /* ── 删除 / 批量 ── */
 async function remove(row: UserRow) {
-  const ok = await confirm({ title: '删除用户', message: `确认删除用户「${row.nickname}」吗？删除后该账号将无法登录。`, confirmText: '删除', danger: true })
+  const ok = await confirm({ title: '删除后台账号', message: `确认删除「${row.nickname}」吗？删除后该账号将无法登录。`, confirmText: '删除', danger: true })
   if (!ok) return
   try {
     await systemApi.users.remove(row.id)
-    pushToast('用户已删除')
+    pushToast('后台账号已删除')
     await list.load()
   } catch (error) {
-    toastError(error, '用户删除失败')
+    toastError(error, '后台账号删除失败')
   }
 }
 
 async function batchStatus(ids: (string | number)[], status: 0 | 1) {
   try {
     await Promise.all(ids.map(id => systemApi.users.updateStatus(Number(id), status)))
-    pushToast(`已${status ? '启用' : '停用'} ${ids.length} 个用户`)
+    pushToast(`已${status ? '启用' : '停用'} ${ids.length} 个账号`)
     await list.load()
   } catch (error) {
     toastError(error, '批量更新状态失败')
@@ -277,11 +275,11 @@ async function batchStatus(ids: (string | number)[], status: 0 | 1) {
 }
 
 async function batchRemove(ids: (string | number)[]) {
-  const ok = await confirm({ title: '批量删除', message: `确认删除选中的 ${ids.length} 个用户吗？`, confirmText: '删除', danger: true })
+  const ok = await confirm({ title: '批量删除', message: `确认删除选中的 ${ids.length} 个后台账号吗？`, confirmText: '删除', danger: true })
   if (!ok) return
   try {
     await Promise.all(ids.map(id => systemApi.users.remove(Number(id))))
-    pushToast(`已删除 ${ids.length} 个用户`)
+    pushToast(`已删除 ${ids.length} 个账号`)
     await list.load()
   } catch (error) {
     toastError(error, '批量删除失败')
@@ -291,9 +289,9 @@ async function batchRemove(ids: (string | number)[]) {
 
 <template>
   <ListPage
-    title="用户管理"
-    desc="维护后台账号、所属部门、岗位与角色；停用的账号无法登录。"
-    table-title="用户列表"
+    title="后台账号"
+    desc="维护登录本控制台的账号、角色与可管理的应用；停用的账号无法登录。"
+    table-title="账号列表"
     :list="list"
     :columns="columns"
     selectable
@@ -302,7 +300,7 @@ async function batchRemove(ids: (string | number)[]) {
   >
     <template #actions>
       <Segmented v-model="view" label="视图" :options="VIEWS" />
-      <PermissionButton perm="system:user:add" variant="primary" icon="plus" @click="openCreate">新增用户</PermissionButton>
+      <PermissionButton perm="system:user:add" variant="primary" icon="plus" @click="openCreate">新增账号</PermissionButton>
     </template>
 
     <template #alt>
@@ -322,32 +320,16 @@ async function batchRemove(ids: (string | number)[]) {
       >
         <template #card="{ item }">
           <div class="ucard-head">
-            <HoverCard>
-              <Avatar :name="item.nickname" :size="32" />
-              <template #card>
-                <div class="hc-head">
-                  <Avatar :name="item.nickname" :size="40" />
-                  <div>
-                    <div class="hc-name">{{ item.nickname }}</div>
-                    <div class="hc-sub">@{{ item.username }}</div>
-                  </div>
-                </div>
-                <dl class="hc-rows">
-                  <dt>部门</dt><dd>{{ item.deptName || '—' }}</dd>
-                  <dt>岗位</dt><dd>{{ item.postName || '—' }}</dd>
-                  <dt>手机</dt><dd class="tnum">{{ item.phone || '—' }}</dd>
-                  <dt>邮箱</dt><dd>{{ item.email || '—' }}</dd>
-                </dl>
-              </template>
-            </HoverCard>
+            <Avatar :name="item.nickname" :size="32" />
             <div style="min-width: 0">
               <div class="ucard-name ellipsis">{{ item.nickname }}</div>
-              <div class="ucard-sub ellipsis">@{{ item.username }} · {{ groupBy === 'dept' ? (item.postName || '未设岗位') : (item.deptName || '未分配部门') }}</div>
+              <div class="ucard-sub ellipsis">@{{ item.username }}</div>
             </div>
           </div>
           <div class="ucard-tags">
             <Tag v-if="item.roleName && groupBy !== 'role'" tone="info">{{ item.roleName }}</Tag>
-            <Tag v-if="item.postName && groupBy !== 'dept'">{{ item.postName }}</Tag>
+            <Tag v-if="isSuper(item)">全部应用</Tag>
+            <Tag v-else-if="item.appNames">{{ item.appNames }}</Tag>
           </div>
           <div class="ucard-foot">
             <span class="ucard-time">{{ item.lastLogin ? `最近登录 ${item.lastLogin}` : '从未登录' }}</span>
@@ -355,10 +337,6 @@ async function batchRemove(ids: (string | number)[]) {
           </div>
         </template>
       </BoardView>
-    </template>
-
-    <template #side>
-      <DeptTree v-model="list.query.deptId" :data="departments" />
     </template>
 
     <template #search>
@@ -389,8 +367,8 @@ async function batchRemove(ids: (string | number)[]) {
               </div>
             </div>
             <dl class="hc-rows">
-              <dt>部门</dt><dd>{{ row.deptName || '—' }}</dd>
               <dt>角色</dt><dd>{{ row.roleName || '—' }}</dd>
+              <dt>应用</dt><dd>{{ isSuper(row) ? '全部应用' : (row.appNames || '—') }}</dd>
               <dt>邮箱</dt><dd>{{ row.email || '—' }}</dd>
               <dt>最近登录</dt><dd class="tnum">{{ row.lastLogin || '从未登录' }}</dd>
             </dl>
@@ -402,8 +380,12 @@ async function batchRemove(ids: (string | number)[]) {
         </div>
       </div>
     </template>
-    <template #cell-postName="{ row }"><span class="muted">{{ row.postName || '—' }}</span></template>
     <template #cell-roleName="{ row }"><Tag v-if="row.roleName" tone="info">{{ row.roleName }}</Tag><span v-else class="faint">未分配</span></template>
+    <template #cell-appNames="{ row }">
+      <span v-if="isSuper(row)" class="faint">全部应用（不受限）</span>
+      <span v-else-if="row.appNames" class="muted">{{ row.appNames }}</span>
+      <span v-else class="faint">未绑定</span>
+    </template>
     <template #cell-phone="{ row }"><span class="tnum muted">{{ row.phone || '—' }}</span></template>
     <template #cell-status="{ row }"><StatusTag :status="row.status" /></template>
     <template #cell-createTime="{ row }"><span class="tnum soft">{{ row.createTime }}</span></template>
@@ -416,14 +398,14 @@ async function batchRemove(ids: (string | number)[]) {
       </div>
     </template>
 
-    <FormDialog :open="dialog" :title="isEdit ? '编辑用户' : '新增用户'" :saving="saving" @close="dialog = false" @submit="submit">
+    <FormDialog :open="dialog" :title="isEdit ? '编辑后台账号' : '新增后台账号'" :saving="saving" @close="dialog = false" @submit="submit">
       <Field label="登录账号" required :error="errors.username">
         <TextInput v-model="form.username" placeholder="字母、数字组合" :disabled="isEdit" :invalid="!!errors.username" autocomplete="off" />
       </Field>
-      <Field label="用户姓名" required :error="errors.nickname">
+      <Field label="姓名" required :error="errors.nickname">
         <TextInput v-model="form.nickname" placeholder="真实姓名" :invalid="!!errors.nickname" />
       </Field>
-      <Field v-if="!isEdit" label="初始密码" required :error="errors.password" hint="默认取自系统参数中的用户初始密码" span>
+      <Field v-if="!isEdit" label="初始密码" required :error="errors.password" hint="默认取自系统参数中的后台账号初始密码" span>
         <TextInput v-model="form.password" placeholder="至少 6 位" :invalid="!!errors.password" autocomplete="new-password" />
       </Field>
       <Field label="手机号码" :error="errors.phone">
@@ -432,17 +414,24 @@ async function batchRemove(ids: (string | number)[]) {
       <Field label="电子邮箱" :error="errors.email">
         <TextInput v-model="form.email" type="email" placeholder="选填" :invalid="!!errors.email" />
       </Field>
-      <Field label="所属部门" required :error="errors.deptId">
-        <DeptSelect v-model="form.deptId" :data="departments" :invalid="!!errors.deptId" />
-      </Field>
-      <Field label="岗位">
-        <Select v-model="form.postId" :options="postOptions" placeholder="选填" clearable />
-      </Field>
       <Field label="角色" required :error="errors.roleId">
         <Select v-model="form.roleId" :options="roleOptions" :invalid="!!errors.roleId" />
       </Field>
       <Field label="账号状态" group>
         <Switch :model-value="form.status === 1" :label="form.status === 1 ? '正常，允许登录' : '停用，禁止登录'" @update:model-value="form.status = $event ? 1 : 0" />
+      </Field>
+      <Field label="可管理的应用" group span :hint="formIsSuper ? '超级管理员不受限，可见全部应用' : '不勾选则看不到任何应用的数据'">
+        <div class="check-grid">
+          <Checkbox
+            v-for="app in apps"
+            :key="app.id"
+            :model-value="formIsSuper || form.appIds.includes(app.id)"
+            :disabled="formIsSuper"
+            :label="`${app.name}（${app.code}）`"
+            @update:model-value="toggleApp(app.id, $event)"
+          />
+          <span v-if="!apps.length" class="faint" style="font-size: 12px">还没有可绑定的应用，请先在「应用管理」新增</span>
+        </div>
       </Field>
     </FormDialog>
 
@@ -456,7 +445,7 @@ async function batchRemove(ids: (string | number)[]) {
       @close="resetTarget = null"
       @submit="submitReset"
     >
-      <Field label="新密码" required :error="resetError" hint="默认取自用户初始密码，请通知用户登录后修改" span>
+      <Field label="新密码" required :error="resetError" hint="默认取自后台账号初始密码，请通知对方登录后修改" span>
         <TextInput v-model="resetPassword" :invalid="!!resetError" autocomplete="new-password" />
       </Field>
     </FormDialog>

@@ -61,7 +61,7 @@ async def main(base_url):
     async with async_playwright() as playwright:
         api = await playwright.request.new_context(base_url=base_url + "/api/")
         browser = await playwright.chromium.launch(headless=True)
-        role_id = user_id = None
+        role_id = user_id = empty_role_id = empty_user_id = None
         try:
             captcha = (await (await api.get("auth/captcha")).json())["data"]
             response = await api.post("auth/login", data={"username": "admin", "password": password,
@@ -71,11 +71,11 @@ async def main(base_url):
             await api.dispose()
             api = await playwright.request.new_context(base_url=base_url + "/api/", extra_http_headers={"Authorization": "Bearer " + token})
             response = await api.post("system/roles", data={"name": "浏览器只读回归", "code": role_code,
-                "dataScope": "SELF", "sort": 99, "status": 1, "menuIds": [100, 101]})
+                "sort": 99, "status": 1, "menuIds": [200, 201]})
             assert response.ok, "测试角色创建失败"
             role_id = (await response.json())["data"]["id"]
             response = await api.post("system/users", data={"username": username, "password": fixture_password,
-                "nickname": "浏览器只读回归", "deptId": 5, "status": 1, "roleIds": [role_id]})
+                "nickname": "浏览器只读回归", "status": 1, "roleIds": [role_id]})
             assert response.ok, "测试用户创建失败"
             user_id = (await response.json())["data"]["id"]
 
@@ -118,8 +118,8 @@ async def main(base_url):
             await sign_in(page, username, fixture_password, "/system/user")
             release_routes.set()
             await page.wait_for_load_state("networkidle")
-            assert await page.locator(".nav-item").all_text_contents() == ["用户管理"], "旧菜单写回或越权菜单可见"
-            assert await page.get_by_role("button", name="新增用户", exact=True).count() == 0, "只读用户看到新增按钮"
+            assert await page.locator(".nav-item").all_text_contents() == ["后台账号"], "旧菜单写回或越权菜单可见"
+            assert await page.get_by_role("button", name="新增账号", exact=True).count() == 0, "只读用户看到新增按钮"
             assert await page.get_by_role("button", name="编辑", exact=True).count() == 0, "只读用户看到编辑按钮"
             await page.unroute("**/api/auth/routes")
             await page.goto(base_url + "/system/role")
@@ -153,11 +153,20 @@ async def main(base_url):
             release_logout.set()
             await page.wait_for_load_state("networkidle")
             assert page.url.endswith("/dashboard"), "旧请求清除了新登录态"
-            assert await page.locator(".nav-item").count() == 11, "管理员菜单不完整"
+            assert await page.locator(".nav-item").count() == 13, "管理员菜单不完整"
             await page.unroute("**/api/health")
             await page.unroute("**/api/auth/logout")
             await sign_out(page)
-            await sign_in(page, "chensy", password, "/no-access")
+            # 无菜单账号：脚本自建一个未授权任何菜单的角色与账号（种子库不再内置这类账号）
+            response = await api.post("system/roles", data={"name": "浏览器无菜单回归", "code": role_code + "_empty",
+                "sort": 99, "status": 1, "menuIds": []})
+            assert response.ok, "无菜单角色创建失败"
+            empty_role_id = (await response.json())["data"]["id"]
+            response = await api.post("system/users", data={"username": username + "_empty", "password": fixture_password,
+                "nickname": "浏览器无菜单回归", "status": 1, "roleIds": [empty_role_id]})
+            assert response.ok, "无菜单用户创建失败"
+            empty_user_id = (await response.json())["data"]["id"]
+            await sign_in(page, username + "_empty", fixture_password, "/no-access")
             await expect(page.get_by_text("暂未分配可用菜单", exact=True)).to_be_visible()
             await page.reload()
             await expect(page.get_by_text("暂未分配可用菜单", exact=True)).to_be_visible()
@@ -168,6 +177,12 @@ async def main(base_url):
             print("最近接口状态：", requests[-14:] if 'requests' in locals() else [])
             raise
         finally:
+            if empty_user_id:
+                response = await api.delete("system/users/" + str(empty_user_id))
+                assert response.ok, "无菜单用户清理失败"
+            if empty_role_id:
+                response = await api.delete("system/roles/" + str(empty_role_id))
+                assert response.ok, "无菜单角色清理失败"
             if user_id:
                 response = await api.delete("system/users/" + str(user_id))
                 assert response.ok, "测试用户清理失败"

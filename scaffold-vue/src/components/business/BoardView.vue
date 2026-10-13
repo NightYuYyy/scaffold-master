@@ -4,7 +4,7 @@ import Icon from '@/components/Icon.vue'
 import { gsap, motionSkipped, createFrameLoop, spring, springOf, EASE } from '@/composables/motion'
 
 /* ============================================================
-   看板分列：按状态 / 部门 / 角色等分列展示卡片，列头着分类色。
+   看板分列：按状态 / 角色等分列展示卡片，列头着分类色。
    - 可拖拽时（draggable）：指针拖起卡片 → 落到其它列 → 调用 onMove（页面负责确认与接口）
      成功：幽灵卡飞向新位置落定（结 Crystallize）；失败或取消：飞回原处（停摆 Halt）
    - 键盘替代：卡片右上角「移动到…」菜单

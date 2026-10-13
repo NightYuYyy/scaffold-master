@@ -20,19 +20,19 @@ test('system api maps user list and CRUD calls to backend endpoints', async () =
   }
   const api = createSystemApi(createHttpClient({ baseUrl: '/api', tokenProvider: () => 'token', fetcher }))
 
-  await api.users.list({ pageNum: 2, pageSize: 20, keyword: 'admin', status: 1, deptId: 6 })
-  await api.users.create({ username: 'it_user', nickname: '测试用户', password: 'admin123', deptId: 6, status: 1, roleIds: [4], postIds: [6] })
-  await api.users.update(99, { nickname: '测试用户已更新', status: 0, roleIds: [5], postIds: [7] })
+  await api.users.list({ pageNum: 2, pageSize: 20, keyword: 'admin', status: 1 })
+  await api.users.create({ username: 'it_user', nickname: '测试用户', password: 'admin123', status: 1, roleIds: [4], appIds: [1] })
+  await api.users.update(99, { nickname: '测试用户已更新', status: 0, roleIds: [5], appIds: [] })
   await api.users.updateStatus(99, 0)
   await api.users.resetPassword(99, 'Yy@123456')
-  const exportBlob = await api.users.export({ keyword: 'admin', status: 1, deptId: 6 })
+  const exportBlob = await api.users.export({ keyword: 'admin', status: 1 })
   await api.users.remove(99)
 
   assert.equal(await exportBlob.text(), '登录账号,用户昵称\nadmin,管理员\n')
-  assert.equal(calls[0].url, '/api/system/users?pageNum=2&pageSize=20&keyword=admin&status=1&deptId=6')
+  assert.equal(calls[0].url, '/api/system/users?pageNum=2&pageSize=20&keyword=admin&status=1')
   assert.equal(calls[1].method, 'POST')
   assert.equal(calls[1].url, '/api/system/users')
-  assert.deepEqual(JSON.parse(calls[1].body ?? '{}'), { username: 'it_user', nickname: '测试用户', password: 'admin123', deptId: 6, status: 1, roleIds: [4], postIds: [6] })
+  assert.deepEqual(JSON.parse(calls[1].body ?? '{}'), { username: 'it_user', nickname: '测试用户', password: 'admin123', status: 1, roleIds: [4], appIds: [1] })
   assert.equal(calls[2].method, 'PUT')
   assert.equal(calls[2].url, '/api/system/users/99')
   assert.equal(calls[3].method, 'PUT')
@@ -42,7 +42,7 @@ test('system api maps user list and CRUD calls to backend endpoints', async () =
   assert.equal(calls[4].url, '/api/system/users/99/password')
   assert.deepEqual(JSON.parse(calls[4].body ?? '{}'), { password: 'Yy@123456' })
   assert.equal(calls[5].method, 'GET')
-  assert.equal(calls[5].url, '/api/system/users/export?keyword=admin&status=1&deptId=6')
+  assert.equal(calls[5].url, '/api/system/users/export?keyword=admin&status=1')
   assert.equal(calls[6].method, 'DELETE')
   assert.equal(calls[6].url, '/api/system/users/99')
 })
@@ -64,10 +64,8 @@ test('system api exposes catalog endpoints used by management pages', async () =
   }
   const api = createSystemApi(createHttpClient({ baseUrl: '/api', tokenProvider: () => 'token', fetcher }))
 
-  await api.roles.create({ name: '角色', code: 'role_code', dataScope: 'SELF', status: 1 })
+  await api.roles.create({ name: '角色', code: 'role_code', status: 1 })
   await api.menus.update(101, { name: '用户管理', visible: 1, status: 1 })
-  await api.depts.remove(6)
-  await api.posts.list({ pageNum: 1, pageSize: 10 })
   await api.dictData.create({ dictType: 'sys_normal_disable', label: '正常', value: '1', status: 1, def: true })
   await api.configs.update(1, { name: '参数', value: 'enabled' })
   await api.operLogs.remove(12)
@@ -88,8 +86,6 @@ test('system api exposes catalog endpoints used by management pages', async () =
   assert.deepEqual(calls.map(call => `${call.method} ${call.url}`), [
     'POST /api/system/roles',
     'PUT /api/system/menus/101',
-    'DELETE /api/system/depts/6',
-    'GET /api/system/posts?pageNum=1&pageSize=10',
     'POST /api/system/dict/data',
     'PUT /api/system/configs/1',
     'DELETE /api/monitor/oper-logs/12',

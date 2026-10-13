@@ -17,9 +17,10 @@ export interface UserRow {
   nickname: string
   phone: string
   email: string
-  deptName: string
-  postName: string
   roleName: string
+  /** 可管理的应用名称（逗号分隔）；超级管理员不受限，为空 */
+  appNames?: string
+  appIds?: number[]
   status: number
   createTime: string
   lastLogin: string
@@ -31,23 +32,21 @@ export interface UserWriteRequest {
   nickname?: string
   phone?: string
   email?: string
-  deptId?: number
   status?: number
   roleIds?: number[]
-  postIds?: number[]
+  /** 可管理的应用 ID；超级管理员忽略 */
+  appIds?: number[]
 }
 
 export interface UserOptions {
-  depts: Record<string, unknown>[]
   roles: Array<{ id: number; name: string }>
-  posts: Array<{ id: number; name: string }>
+  apps: Array<{ id: number; code: string; name: string }>
   initPassword: string
 }
 
 export interface RoleWriteRequest {
   name?: string
   code?: string
-  dataScope?: string
   sort?: number
   status?: number
   remark?: string
@@ -65,24 +64,6 @@ export interface MenuWriteRequest {
   sort?: number
   visible?: number
   status?: number
-}
-
-export interface DeptWriteRequest {
-  parentId?: number
-  name?: string
-  leader?: string
-  phone?: string
-  email?: string
-  sort?: number
-  status?: number
-}
-
-export interface PostWriteRequest {
-  postCode?: string
-  postName?: string
-  sort?: number
-  status?: number
-  remark?: string
 }
 
 export interface DictTypeWriteRequest {
@@ -173,8 +154,8 @@ export interface LoginHeatmap {
 
 /** 权限关系图：users 用户节点（无用户查询权限时为空），roles 角色（menuIds 授予的菜单），menus 菜单，userRoles [用户ID, 角色ID] 关联 */
 export interface PermissionGraph {
-  users: Array<{ id: number; username: string; nickname: string; deptName: string | null; status: number }>
-  roles: Array<{ id: number; name: string; code: string; dataScope: string; status: number; builtin: boolean; userCount: number; menuIds: number[] }>
+  users: Array<{ id: number; username: string; nickname: string; status: number }>
+  roles: Array<{ id: number; name: string; code: string; status: number; builtin: boolean; userCount: number; menuIds: number[] }>
   menus: Array<{ id: number; parentId: number; name: string; type: 'dir' | 'menu' | 'btn'; icon: string | null; path: string | null; permission: string | null; sort: number; visible: number; status: number }>
   userRoles: Array<[number, number]>
   usersVisible: boolean
@@ -203,17 +184,6 @@ export function createSystemApi(client: HttpClient) {
       update: (id: number, body: MenuWriteRequest) => client.put<void>(`/system/menus/${id}`, body),
       remove: (id: number) => client.delete<void>(`/system/menus/${id}`),
       export: (query?: QueryParams) => client.download('/system/menus/export', query),
-    },
-    depts: {
-      tree: (query?: QueryParams) => client.get<Record<string, unknown>[]>('/system/depts/tree', query),
-      create: (body: DeptWriteRequest) => client.post<IdResponse>('/system/depts', body),
-      update: (id: number, body: DeptWriteRequest) => client.put<void>(`/system/depts/${id}`, body),
-      remove: (id: number) => client.delete<void>(`/system/depts/${id}`),
-      export: (query?: QueryParams) => client.download('/system/depts/export', query),
-    },
-    posts: {
-      ...crudPage<Record<string, unknown>, PostWriteRequest>(client, '/system/posts'),
-      export: (query?: QueryParams) => client.download('/system/posts/export', query),
     },
     dictTypes: {
       ...crudPage<Record<string, unknown>, DictTypeWriteRequest>(client, '/system/dict/types'),

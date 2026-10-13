@@ -6,14 +6,14 @@ import { matchIntent, permissionFromQuestion } from '../askMatch.ts'
 const graph = {
   usersVisible: true,
   users: [
-    { id: 1, username: 'admin', nickname: '管理员', deptName: '总部', status: 1 },
-    { id: 2, username: 'li', nickname: '李四', deptName: '研发部', status: 1 },
-    { id: 3, username: 'wang', nickname: '王五', deptName: null, status: 1 },
+    { id: 1, username: 'admin', nickname: '管理员', status: 1 },
+    { id: 2, username: 'li', nickname: '李四', status: 1 },
+    { id: 3, username: 'wang', nickname: '王五', status: 1 },
   ],
   roles: [
-    { id: 1, name: '超级管理员', code: 'super_admin', dataScope: '全部数据权限', status: 1, builtin: true, userCount: 1, menuIds: [] },
-    { id: 2, name: '系统管理员', code: 'sys_admin', dataScope: '本部门', status: 1, builtin: false, userCount: 1, menuIds: [10, 11, 12] },
-    { id: 3, name: '访客', code: 'guest', dataScope: '仅本人', status: 0, builtin: false, userCount: 0, menuIds: [10] },
+    { id: 1, name: '超级管理员', code: 'super_admin', status: 1, builtin: true, userCount: 1, menuIds: [] },
+    { id: 2, name: '系统管理员', code: 'sys_admin', status: 1, builtin: false, userCount: 1, menuIds: [10, 11, 12] },
+    { id: 3, name: '访客', code: 'guest', status: 0, builtin: false, userCount: 0, menuIds: [10] },
   ],
   menus: [
     { id: 10, parentId: 0, name: '系统管理', type: 'dir', icon: null, path: '/system', permission: null, sort: 1, visible: 1, status: 1 },

@@ -16,7 +16,6 @@ interface OperRow {
   module: string
   action: string
   operName: string
-  dept?: string
   method: string
   url: string
   ip?: string
@@ -222,7 +221,7 @@ async function clearAll() {
       <template v-if="detail">
         <div ref="detailBody" class="drawer-stack">
         <div class="kv-grid">
-          <div class="kv"><div class="kv-label">操作人</div><div class="kv-value">{{ detail.operName }}<span v-if="detail.dept" class="soft"> · {{ detail.dept }}</span></div></div>
+          <div class="kv"><div class="kv-label">操作人</div><div class="kv-value">{{ detail.operName }}</div></div>
           <div class="kv"><div class="kv-label">操作时间</div><div class="kv-value tnum">{{ detail.operTime }}</div></div>
           <div class="kv span-2"><div class="kv-label">请求</div><div class="kv-value mono">{{ detail.method }} {{ detail.url }}</div></div>
           <div class="kv"><div class="kv-label">来源</div><div class="kv-value tnum">{{ detail.ip || '—' }} {{ detail.location || '' }}</div></div>

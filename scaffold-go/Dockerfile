@@ -1,4 +1,4 @@
-# 后端镜像；构建上下文为仓库根目录（需要 scaffold-system/sql 的初始化脚本）：
+# 后端镜像；构建上下文为仓库根目录（需要根目录 sql/ 的初始化脚本）：
 #   docker build -f scaffold-go/Dockerfile -t scaffold-backend .
 # 国内构建可加 --build-arg GOPROXY=https://goproxy.cn,direct
 FROM golang:1.26-alpine AS build
@@ -14,7 +14,7 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata wget && adduser -D -u 10001 app
 WORKDIR /app
 COPY --from=build /out/scaffold-server ./scaffold-server
-COPY scaffold-system/sql/ ./sql/
+COPY sql/ ./sql/
 ENV SQL_DIR=/app/sql TZ=Asia/Shanghai SERVER_PORT=8080
 USER app
 EXPOSE 8080

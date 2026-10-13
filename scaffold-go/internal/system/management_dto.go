@@ -3,26 +3,16 @@ package system
 // 对应 Java com.scaffold.system.domain.dto 下的写请求。
 // Java 装箱字段（String/Integer/Long/Boolean/List<Long>）一律用指针或切片，保留 null 语义。
 
-// PostWriteRequest 对应 Java PostWriteRequest。
-type PostWriteRequest struct {
-	PostCode *string `json:"postCode"`
-	PostName *string `json:"postName"`
-	Sort     *int    `json:"sort"`
-	Status   *int    `json:"status"`
-	Remark   *string `json:"remark"`
-}
-
-// UserWriteRequest 对应 Java UserWriteRequest。
+// UserWriteRequest 后台账号写请求；AppIDs 为可管理的应用（sys_user_app），超级管理员不受其限制。
 type UserWriteRequest struct {
 	Username *string `json:"username"`
 	Password *string `json:"password"`
 	Nickname *string `json:"nickname"`
 	Phone    *string `json:"phone"`
 	Email    *string `json:"email"`
-	DeptID   *int64  `json:"deptId"`
 	Status   *int    `json:"status"`
 	RoleIDs  []int64 `json:"roleIds"`
-	PostIDs  []int64 `json:"postIds"`
+	AppIDs   []int64 `json:"appIds"`
 }
 
 // UserStatusRequest 对应 Java UserStatusRequest。
@@ -37,24 +27,12 @@ type UserPasswordResetRequest struct {
 
 // RoleWriteRequest 对应 Java RoleWriteRequest。
 type RoleWriteRequest struct {
-	Name      *string `json:"name"`
-	Code      *string `json:"code"`
-	DataScope *string `json:"dataScope"`
-	Sort      *int    `json:"sort"`
-	Status    *int    `json:"status"`
-	Remark    *string `json:"remark"`
-	MenuIDs   []int64 `json:"menuIds"`
-}
-
-// DeptWriteRequest 对应 Java DeptWriteRequest。
-type DeptWriteRequest struct {
-	ParentID *int64  `json:"parentId"`
-	Name     *string `json:"name"`
-	Leader   *string `json:"leader"`
-	Phone    *string `json:"phone"`
-	Email    *string `json:"email"`
-	Sort     *int    `json:"sort"`
-	Status   *int    `json:"status"`
+	Name    *string `json:"name"`
+	Code    *string `json:"code"`
+	Sort    *int    `json:"sort"`
+	Status  *int    `json:"status"`
+	Remark  *string `json:"remark"`
+	MenuIDs []int64 `json:"menuIds"`
 }
 
 // MenuWriteRequest 对应 Java MenuWriteRequest。

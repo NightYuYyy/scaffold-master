@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
-	"strconv"
 	"strings"
 	"unicode/utf16"
 
@@ -15,31 +14,34 @@ import (
 
 // ManagementService 对应 Java SystemManagementService。
 type ManagementService struct {
-	db    *sql.DB
-	perm  *PermissionResolver
-	scope framework.DataScopeResolver
+	db   *sql.DB
+	perm *PermissionResolver
 }
 
 func NewManagementService(d Deps) *ManagementService {
-	return &ManagementService{db: d.DB, perm: d.Perm, scope: d.DataScope}
+	return &ManagementService{db: d.DB, perm: d.Perm}
 }
 
 type mgmtPage = framework.PageResult[framework.Row]
 
-// UserOptions 用户页所需的引用选项，避免为只读用户申请角色、岗位和参数管理权限。
+// UserOptions 后台账号页所需的引用选项，避免为只读用户申请角色和参数管理权限。
+// apps 为当前账号可见的应用（super_admin 全部，其余为 sys_user_app 绑定）。
 func (s *ManagementService) UserOptions(ctx context.Context) (map[string]any, error) {
 	username := mgmtCurrentUsername(ctx)
 	canEdit := s.perm.HasPermission(ctx, username, "system:user:add") ||
 		s.perm.HasPermission(ctx, username, "system:user:edit")
 	canSetPassword := s.perm.HasPermission(ctx, username, "system:user:add") ||
 		s.perm.HasPermission(ctx, username, "system:user:resetPwd")
-	deptRows, err := mgmtSelectDepts(ctx, s.db, nil, nil)
+	scope, err := selectAppScope(ctx, s.db, username)
 	if err != nil {
 		return nil, err
 	}
-	depts := mgmtPick(deptRows, "id", "parentId", "name", "status")
+	apps, err := mgmtSelectAppOptions(ctx, s.db, scope)
+	if err != nil {
+		return nil, err
+	}
 	one := 1
-	roles, posts := []framework.Row{}, []framework.Row{}
+	roles := []framework.Row{}
 	if canEdit {
 		roleRows, err := mgmtSelectRoles(ctx, s.db, nil, &one, 0, 5000)
 		if err != nil {
@@ -47,13 +49,6 @@ func (s *ManagementService) UserOptions(ctx context.Context) (map[string]any, er
 		}
 		for _, row := range roleRows {
 			roles = append(roles, framework.Row{"id": row["id"], "name": row["name"]})
-		}
-		postRows, err := mgmtSelectPosts(ctx, s.db, nil, &one, 0, 5000)
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range postRows {
-			posts = append(posts, framework.Row{"id": row["id"], "name": row["postName"]})
 		}
 	}
 	initialPassword := ""
@@ -70,31 +65,27 @@ func (s *ManagementService) UserOptions(ctx context.Context) (map[string]any, er
 			}
 		}
 	}
-	return map[string]any{"depts": mgmtTreeOf(depts), "roles": roles, "posts": posts, "initPassword": initialPassword}, nil
+	return map[string]any{"roles": roles, "apps": apps, "initPassword": initialPassword}, nil
 }
 
 func (s *ManagementService) DictOptions(ctx context.Context, dictType string) ([]framework.Row, error) {
 	return mgmtSelectDictOptions(ctx, s.db, dictType)
 }
 
-// Users @DataScope
-func (s *ManagementService) Users(ctx context.Context, q framework.PageQuery, keyword *string, status *int, deptID, postID *int64) (mgmtPage, error) {
-	scope := s.scope.Resolve(ctx, framework.CurrentUsername(ctx))
-	total, err := mgmtCountUsers(ctx, s.db, keyword, status, deptID, postID, scope)
+func (s *ManagementService) Users(ctx context.Context, q framework.PageQuery, keyword *string, status *int) (mgmtPage, error) {
+	total, err := mgmtCountUsers(ctx, s.db, keyword, status)
 	if err != nil {
 		return mgmtPage{}, err
 	}
-	rows, err := mgmtSelectUsers(ctx, s.db, keyword, status, deptID, postID, scope, q.Offset(), q.NormalizedPageSize())
+	rows, err := mgmtSelectUsers(ctx, s.db, keyword, status, q.Offset(), q.NormalizedPageSize())
 	if err != nil {
 		return mgmtPage{}, err
 	}
-	return framework.PageOf(rows, total, q), nil
+	return framework.PageOf(mgmtUserRows(rows), total, q), nil
 }
 
-// ExportUsers @DataScope
-func (s *ManagementService) ExportUsers(ctx context.Context, keyword *string, status *int, deptID, postID *int64) (string, error) {
-	scope := s.scope.Resolve(ctx, framework.CurrentUsername(ctx))
-	rows, err := mgmtSelectUsers(ctx, s.db, keyword, status, deptID, postID, scope, 0, 5000)
+func (s *ManagementService) ExportUsers(ctx context.Context, keyword *string, status *int) (string, error) {
+	rows, err := mgmtSelectUsers(ctx, s.db, keyword, status, 0, 5000)
 	if err != nil {
 		return "", err
 	}
@@ -105,8 +96,7 @@ func (s *ManagementService) ExportUsers(ctx context.Context, keyword *string, st
 			row["nickname"],
 			row["phone"],
 			row["email"],
-			row["deptName"],
-			row["postName"],
+			row["appNames"],
 			row["roleName"],
 			mgmtUserStatusText(row["status"]),
 			row["createTime"],
@@ -114,7 +104,7 @@ func (s *ManagementService) ExportUsers(ctx context.Context, keyword *string, st
 		})
 	}
 	return mgmtCsv(
-		[]string{"登录账号", "用户昵称", "手机号", "邮箱", "部门", "岗位", "角色", "状态", "创建时间", "最近登录"},
+		[]string{"登录账号", "用户昵称", "手机号", "邮箱", "可管理应用", "角色", "状态", "创建时间", "最近登录"},
 		data,
 	), nil
 }
@@ -131,16 +121,15 @@ func (s *ManagementService) Roles(ctx context.Context, q framework.PageQuery, ke
 	return framework.PageOf(mgmtRoleRows(rows), total, q), nil
 }
 
-// PermissionGraph @DataScope
+// PermissionGraph
 // 权限关系图：角色、菜单与「用户-角色」关联一次返回，供溯源视图、菜单星图与问答规则在前端组合。
-// 用户节点只对有用户查询权限的账号返回，并遵守数据权限。
+// 用户节点只对有用户查询权限的账号返回。
 func (s *ManagementService) PermissionGraph(ctx context.Context) (map[string]any, error) {
-	scope := s.scope.Resolve(ctx, framework.CurrentUsername(ctx))
 	roleRows, err := mgmtSelectRoles(ctx, s.db, nil, nil, 0, 5000)
 	if err != nil {
 		return nil, err
 	}
-	roles := mgmtPick(mgmtRoleRows(roleRows), "id", "name", "code", "dataScope", "status", "builtin", "userCount", "menuIds")
+	roles := mgmtPick(mgmtRoleRows(roleRows), "id", "name", "code", "status", "builtin", "userCount", "menuIds")
 	menuRows, err := mgmtSelectMenus(ctx, s.db, nil, nil)
 	if err != nil {
 		return nil, err
@@ -150,7 +139,7 @@ func (s *ManagementService) PermissionGraph(ctx context.Context) (map[string]any
 	users := []framework.Row{}
 	userRoles := [][]int64{}
 	if canSeeUsers {
-		if users, err = mgmtSelectGraphUsers(ctx, s.db, scope); err != nil {
+		if users, err = mgmtSelectGraphUsers(ctx, s.db); err != nil {
 			return nil, err
 		}
 		userIDs := map[int64]bool{}
@@ -191,10 +180,10 @@ func (s *ManagementService) ExportRoles(ctx context.Context, keyword *string, st
 	}
 	data := make([][]any, 0, len(rows))
 	for _, row := range rows {
-		data = append(data, []any{row["name"], row["code"], row["dataScope"],
+		data = append(data, []any{row["name"], row["code"],
 			mgmtUserStatusText(row["status"]), row["createTime"], row["remark"]})
 	}
-	return mgmtCsv([]string{"角色名称", "权限字符", "数据权限", "状态", "创建时间", "备注"}, data), nil
+	return mgmtCsv([]string{"角色名称", "权限字符", "状态", "创建时间", "备注"}, data), nil
 }
 
 func (s *ManagementService) Menus(ctx context.Context, keyword *string, status *int) ([]framework.Row, error) {
@@ -217,52 +206,6 @@ func (s *ManagementService) ExportMenus(ctx context.Context, keyword *string, st
 			row["sort"], mgmtUserStatusText(row["status"])})
 	}
 	return mgmtCsv([]string{"菜单名称", "类型", "图标", "路由地址", "组件路径", "权限标识", "排序", "状态"}, data), nil
-}
-
-func (s *ManagementService) Depts(ctx context.Context, keyword *string, status *int) ([]framework.Row, error) {
-	rows, err := mgmtSelectDepts(ctx, s.db, keyword, status)
-	if err != nil {
-		return nil, err
-	}
-	return mgmtTreeOf(rows), nil
-}
-
-func (s *ManagementService) ExportDepts(ctx context.Context, keyword *string, status *int) (string, error) {
-	rows, err := mgmtSelectDepts(ctx, s.db, keyword, status)
-	if err != nil {
-		return "", err
-	}
-	data := make([][]any, 0, len(rows))
-	for _, row := range rows {
-		data = append(data, []any{row["name"], row["leader"], row["phone"],
-			row["email"], row["sort"], mgmtUserStatusText(row["status"])})
-	}
-	return mgmtCsv([]string{"部门名称", "负责人", "联系电话", "邮箱", "排序", "状态"}, data), nil
-}
-
-func (s *ManagementService) Posts(ctx context.Context, q framework.PageQuery, keyword *string, status *int) (mgmtPage, error) {
-	total, err := mgmtCountPosts(ctx, s.db, keyword, status)
-	if err != nil {
-		return mgmtPage{}, err
-	}
-	rows, err := mgmtSelectPosts(ctx, s.db, keyword, status, q.Offset(), q.NormalizedPageSize())
-	if err != nil {
-		return mgmtPage{}, err
-	}
-	return framework.PageOf(rows, total, q), nil
-}
-
-func (s *ManagementService) ExportPosts(ctx context.Context, keyword *string, status *int) (string, error) {
-	rows, err := mgmtSelectPosts(ctx, s.db, keyword, status, 0, 5000)
-	if err != nil {
-		return "", err
-	}
-	data := make([][]any, 0, len(rows))
-	for _, row := range rows {
-		data = append(data, []any{row["postCode"], row["postName"], row["sort"],
-			mgmtUserStatusText(row["status"]), row["createTime"], row["remark"]})
-	}
-	return mgmtCsv([]string{"岗位编码", "岗位名称", "排序", "状态", "创建时间", "备注"}, data), nil
 }
 
 func (s *ManagementService) DictTypes(ctx context.Context, q framework.PageQuery, keyword *string, status *int) (mgmtPage, error) {
@@ -361,7 +304,6 @@ func (s *ManagementService) ExportOperLogs(ctx context.Context, keyword *string,
 			row["url"],
 			row["params"],
 			row["operName"],
-			row["dept"],
 			row["ip"],
 			row["location"],
 			row["cost"],
@@ -371,7 +313,7 @@ func (s *ManagementService) ExportOperLogs(ctx context.Context, keyword *string,
 		})
 	}
 	return mgmtCsv(
-		[]string{"模块", "类型", "请求方式", "请求地址", "请求参数", "操作人", "部门", "IP", "地点", "耗时", "结果", "操作时间", "异常信息"},
+		[]string{"模块", "类型", "请求方式", "请求地址", "请求参数", "操作人", "IP", "地点", "耗时", "结果", "操作时间", "异常信息"},
 		data,
 	), nil
 }
@@ -432,44 +374,6 @@ func (s *ManagementService) ClearLoginLogs(ctx context.Context) error {
 	})
 }
 
-// CreatePost @Transactional
-func (s *ManagementService) CreatePost(ctx context.Context, req PostWriteRequest) (IdResponse, error) {
-	var id int64
-	err := framework.Tx(ctx, s.db, func(tx *sql.Tx) error {
-		postCode, err := mgmtRequired(req.PostCode, "岗位编码不能为空")
-		if err != nil {
-			return err
-		}
-		postName, err := mgmtRequired(req.PostName, "岗位名称不能为空")
-		if err != nil {
-			return err
-		}
-		n, err := mgmtCountPostCode(ctx, tx, postCode, nil)
-		if err = mgmtExists(n, err, "岗位编码已存在"); err != nil {
-			return err
-		}
-		id, err = mgmtInsertPost(ctx, tx, postCode, postName, mgmtDefaultInt(req.Sort, 0), mgmtDefaultInt(req.Status, 1), req.Remark, mgmtCurrentUsername(ctx))
-		return err
-	})
-	return IdResponse{ID: id}, err
-}
-
-// UpdatePost @Transactional
-func (s *ManagementService) UpdatePost(ctx context.Context, id int64, req PostWriteRequest) error {
-	return framework.Tx(ctx, s.db, func(tx *sql.Tx) error {
-		n, err := mgmtUpdatePost(ctx, tx, id, mgmtTrimToNull(req.PostName), req.Sort, req.Status, req.Remark, mgmtCurrentUsername(ctx))
-		return mgmtAffected(n, err, "岗位不存在或已删除")
-	})
-}
-
-// DeletePost @Transactional
-func (s *ManagementService) DeletePost(ctx context.Context, id int64) error {
-	return framework.Tx(ctx, s.db, func(tx *sql.Tx) error {
-		n, err := mgmtSoftDeletePost(ctx, tx, id, mgmtCurrentUsername(ctx))
-		return mgmtAffected(n, err, "岗位不存在或已删除")
-	})
-}
-
 // CreateUser @Transactional
 func (s *ManagementService) CreateUser(ctx context.Context, req UserWriteRequest) (IdResponse, error) {
 	var userID int64
@@ -491,14 +395,14 @@ func (s *ManagementService) CreateUser(ctx context.Context, req UserWriteRequest
 			return err
 		}
 		userID, err = mgmtInsertUser(ctx, tx, username, hashed, nickname,
-			req.Phone, req.Email, req.DeptID, mgmtDefaultInt(req.Status, 1), mgmtCurrentUsername(ctx))
+			req.Phone, req.Email, mgmtDefaultInt(req.Status, 1), mgmtCurrentUsername(ctx))
 		if err != nil {
 			return err
 		}
 		if err := mgmtReplaceUserRoles(ctx, tx, userID, req.RoleIDs); err != nil {
 			return err
 		}
-		return mgmtReplaceUserPosts(ctx, tx, userID, req.PostIDs)
+		return mgmtReplaceUserApps(ctx, tx, userID, req.AppIDs)
 	})
 	return IdResponse{ID: userID}, err
 }
@@ -506,7 +410,7 @@ func (s *ManagementService) CreateUser(ctx context.Context, req UserWriteRequest
 // UpdateUser @Transactional
 func (s *ManagementService) UpdateUser(ctx context.Context, id int64, req UserWriteRequest) error {
 	return framework.Tx(ctx, s.db, func(tx *sql.Tx) error {
-		n, err := mgmtUpdateUser(ctx, tx, id, mgmtTrimToNull(req.Nickname), req.Phone, req.Email, req.DeptID, req.Status, mgmtCurrentUsername(ctx))
+		n, err := mgmtUpdateUser(ctx, tx, id, mgmtTrimToNull(req.Nickname), req.Phone, req.Email, req.Status, mgmtCurrentUsername(ctx))
 		if err = mgmtAffected(n, err, "用户不存在或已删除"); err != nil {
 			return err
 		}
@@ -515,8 +419,8 @@ func (s *ManagementService) UpdateUser(ctx context.Context, id int64, req UserWr
 				return err
 			}
 		}
-		if req.PostIDs != nil {
-			return mgmtReplaceUserPosts(ctx, tx, id, req.PostIDs)
+		if req.AppIDs != nil {
+			return mgmtReplaceUserApps(ctx, tx, id, req.AppIDs)
 		}
 		return nil
 	})
@@ -561,7 +465,10 @@ func (s *ManagementService) DeleteUser(ctx context.Context, id int64) error {
 			return framework.Biz("内置管理员不允许删除")
 		}
 		n, err := mgmtSoftDeleteUser(ctx, tx, id, mgmtCurrentUsername(ctx))
-		return mgmtAffected(n, err, "用户不存在或已删除")
+		if err = mgmtAffected(n, err, "用户不存在或已删除"); err != nil {
+			return err
+		}
+		return mgmtDeleteUserApps(ctx, tx, id)
 	})
 }
 
@@ -581,7 +488,7 @@ func (s *ManagementService) CreateRole(ctx context.Context, req RoleWriteRequest
 		if err = mgmtExists(n, err, "角色编码已存在"); err != nil {
 			return err
 		}
-		roleID, err = mgmtInsertRole(ctx, tx, name, code, mgmtDefaultString(req.DataScope, "SELF"),
+		roleID, err = mgmtInsertRole(ctx, tx, name, code,
 			mgmtDefaultInt(req.Sort, 0), mgmtDefaultInt(req.Status, 1), req.Remark, mgmtCurrentUsername(ctx))
 		if err != nil {
 			return err
@@ -594,7 +501,7 @@ func (s *ManagementService) CreateRole(ctx context.Context, req RoleWriteRequest
 // UpdateRole @Transactional
 func (s *ManagementService) UpdateRole(ctx context.Context, id int64, req RoleWriteRequest) error {
 	return framework.Tx(ctx, s.db, func(tx *sql.Tx) error {
-		n, err := mgmtUpdateRole(ctx, tx, id, mgmtTrimToNull(req.Name), mgmtTrimToNull(req.DataScope), req.Sort, req.Status, req.Remark, mgmtCurrentUsername(ctx))
+		n, err := mgmtUpdateRole(ctx, tx, id, mgmtTrimToNull(req.Name), req.Sort, req.Status, req.Remark, mgmtCurrentUsername(ctx))
 		if err = mgmtAffected(n, err, "角色不存在、已删除或为内置角色"); err != nil {
 			return err
 		}
@@ -617,62 +524,6 @@ func (s *ManagementService) DeleteRole(ctx context.Context, id int64) error {
 		}
 		n, err = mgmtSoftDeleteRole(ctx, tx, id, mgmtCurrentUsername(ctx))
 		return mgmtAffected(n, err, "角色不存在、已删除或为内置角色")
-	})
-}
-
-// CreateDept @Transactional
-func (s *ManagementService) CreateDept(ctx context.Context, req DeptWriteRequest) (IdResponse, error) {
-	var id int64
-	err := framework.Tx(ctx, s.db, func(tx *sql.Tx) error {
-		name, err := mgmtRequired(req.Name, "部门名称不能为空")
-		if err != nil {
-			return err
-		}
-		parentID := int64(0)
-		if req.ParentID != nil {
-			parentID = *req.ParentID
-		}
-		ancestors, err := mgmtAncestorsFor(ctx, tx, parentID)
-		if err != nil {
-			return err
-		}
-		id, err = mgmtInsertDept(ctx, tx, parentID, ancestors, name, req.Leader, req.Phone, req.Email,
-			mgmtDefaultInt(req.Sort, 0), mgmtDefaultInt(req.Status, 1), mgmtCurrentUsername(ctx))
-		return err
-	})
-	return IdResponse{ID: id}, err
-}
-
-// UpdateDept @Transactional
-func (s *ManagementService) UpdateDept(ctx context.Context, id int64, req DeptWriteRequest) error {
-	return framework.Tx(ctx, s.db, func(tx *sql.Tx) error {
-		var ancestors *string
-		if req.ParentID != nil {
-			a, err := mgmtAncestorsFor(ctx, tx, *req.ParentID)
-			if err != nil {
-				return err
-			}
-			ancestors = &a
-		}
-		n, err := mgmtUpdateDept(ctx, tx, id, req.ParentID, ancestors, mgmtTrimToNull(req.Name), req.Leader, req.Phone, req.Email,
-			req.Sort, req.Status, mgmtCurrentUsername(ctx))
-		return mgmtAffected(n, err, "部门不存在或已删除")
-	})
-}
-
-// DeleteDept @Transactional
-func (s *ManagementService) DeleteDept(ctx context.Context, id int64) error {
-	return framework.Tx(ctx, s.db, func(tx *sql.Tx) error {
-		n, err := mgmtCountDeptChildren(ctx, tx, id)
-		if err = mgmtExists(n, err, "存在下级部门，不能删除"); err != nil {
-			return err
-		}
-		n, err = mgmtCountDeptUsers(ctx, tx, id)
-		if err = mgmtExists(n, err, "部门已关联用户，不能删除"); err != nil {
-			return err
-		}
-		n, err = mgmtSoftDeleteDept(ctx, tx, id, mgmtCurrentUsername(ctx))
-		return mgmtAffected(n, err, "部门不存在或已删除")
 	})
 }
 
@@ -897,20 +748,38 @@ func mgmtRoleRows(rows []framework.Row) []framework.Row {
 	out := make([]framework.Row, 0, len(rows))
 	for _, row := range rows {
 		c := mgmtBooleanRow(row, "builtin")
-		ids := framework.AsString(c["menuIdsText"])
-		menuIDs := []int64{}
-		if strings.TrimSpace(ids) != "" && ids != "null" {
-			for _, id := range strings.Split(ids, ",") {
-				if strings.TrimSpace(id) != "" {
-					menuIDs = append(menuIDs, framework.AsInt64(id))
-				}
-			}
-		}
+		c["menuIds"] = mgmtSplitIDs(c["menuIdsText"])
 		delete(c, "menuIdsText")
-		c["menuIds"] = menuIDs
 		out = append(out, c)
 	}
 	return out
+}
+
+// userRows：appIdsText 拆为 appIds 列表（appNames 保持逗号拼接的字符串）。
+func mgmtUserRows(rows []framework.Row) []framework.Row {
+	out := make([]framework.Row, 0, len(rows))
+	for _, row := range rows {
+		c := maps.Clone(row)
+		c["appIds"] = mgmtSplitIDs(c["appIdsText"])
+		delete(c, "appIdsText")
+		out = append(out, c)
+	}
+	return out
+}
+
+// mgmtSplitIDs 把 GROUP_CONCAT 出来的 "1,2,3" 拆为 []int64；空、NULL 均为空切片。
+func mgmtSplitIDs(v any) []int64 {
+	ids := []int64{}
+	text := framework.AsString(v)
+	if strings.TrimSpace(text) == "" || text == "null" {
+		return ids
+	}
+	for _, id := range strings.Split(text, ",") {
+		if strings.TrimSpace(id) != "" {
+			ids = append(ids, framework.AsInt64(id))
+		}
+	}
+	return ids
 }
 
 // booleanRow
@@ -946,13 +815,13 @@ func mgmtReplaceUserRoles(ctx context.Context, q framework.Querier, userID int64
 	return nil
 }
 
-// replaceUserPosts
-func mgmtReplaceUserPosts(ctx context.Context, q framework.Querier, userID int64, postIDs []int64) error {
-	if err := mgmtDeleteUserPosts(ctx, q, userID); err != nil {
+// replaceUserApps：整体替换 sys_user_app 绑定，与角色同一模式。
+func mgmtReplaceUserApps(ctx context.Context, q framework.Querier, userID int64, appIDs []int64) error {
+	if err := mgmtDeleteUserApps(ctx, q, userID); err != nil {
 		return err
 	}
-	for _, postID := range postIDs {
-		if err := mgmtInsertUserPost(ctx, q, userID, postID); err != nil {
+	for _, appID := range appIDs {
+		if err := mgmtInsertUserApp(ctx, q, userID, appID); err != nil {
 			return err
 		}
 	}
@@ -970,24 +839,6 @@ func mgmtReplaceRoleMenus(ctx context.Context, q framework.Querier, roleID int64
 		}
 	}
 	return nil
-}
-
-// ancestorsFor
-func mgmtAncestorsFor(ctx context.Context, q framework.Querier, parentID int64) (string, error) {
-	if parentID == 0 {
-		return "", nil
-	}
-	parentAncestors, err := mgmtSelectDeptAncestors(ctx, q, parentID)
-	if err != nil {
-		return "", err
-	}
-	if parentAncestors == nil {
-		return "", framework.Biz("上级部门不存在或已删除")
-	}
-	if strings.TrimSpace(*parentAncestors) == "" {
-		return strconv.FormatInt(parentID, 10), nil
-	}
-	return *parentAncestors + "," + strconv.FormatInt(parentID, 10), nil
 }
 
 // currentUsername：未登录时为 "system"。
@@ -1225,53 +1076,17 @@ func RegisterManagementRoutes(mux *http.ServeMux, d Deps, s *ManagementService) 
 	perm := d.Security.Perm
 	oper := func(module, action string) framework.Middleware { return framework.OperLog(d.Recorder, module, action) }
 
-	// ---------- 用户 ----------
-	mux.Handle("GET /api/system/users", framework.Handle(mgmtJSON(func(r *http.Request) (any, error) {
-		q, err := framework.ParsePage(r)
-		if err != nil {
-			return nil, err
-		}
-		status, err := framework.QueryInt(r, "status")
-		if err != nil {
-			return nil, err
-		}
-		deptID, err := framework.QueryInt64(r, "deptId")
-		if err != nil {
-			return nil, err
-		}
-		postID, err := framework.QueryInt64(r, "postId")
-		if err != nil {
-			return nil, err
-		}
-		return s.Users(r.Context(), q, framework.QueryString(r, "keyword"), status, deptID, postID)
-	}), perm("system:user:list")))
+	// ---------- 后台账号 ----------
+	mux.Handle("GET /api/system/users", framework.Handle(mgmtPageHandler("status", s.Users), perm("system:user:list")))
 	mux.Handle("GET /api/system/users/options", framework.Handle(mgmtJSON(func(r *http.Request) (any, error) {
 		return s.UserOptions(r.Context())
 	}), perm("system:user:list")))
-	mux.Handle("GET /api/system/users/export", framework.Handle(func(w http.ResponseWriter, r *http.Request) error {
-		status, err := framework.QueryInt(r, "status")
-		if err != nil {
-			return err
-		}
-		deptID, err := framework.QueryInt64(r, "deptId")
-		if err != nil {
-			return err
-		}
-		postID, err := framework.QueryInt64(r, "postId")
-		if err != nil {
-			return err
-		}
-		content, err := s.ExportUsers(r.Context(), framework.QueryString(r, "keyword"), status, deptID, postID)
-		if err != nil {
-			return err
-		}
-		return framework.CSV(w, "users.csv", content)
-	}, perm("system:user:list")))
-	mux.Handle("POST /api/system/users", framework.Handle(mgmtCreateHandler(s.CreateUser), oper("用户管理", "新增"), perm("system:user:add")))
-	mux.Handle("PUT /api/system/users/{id}", framework.Handle(mgmtUpdateHandler(s.UpdateUser), oper("用户管理", "修改"), perm("system:user:edit")))
-	mux.Handle("PUT /api/system/users/{id}/status", framework.Handle(mgmtUpdateHandler(s.UpdateUserStatus), oper("用户管理", "状态变更"), perm("system:user:edit")))
-	mux.Handle("PUT /api/system/users/{id}/password", framework.Handle(mgmtUpdateHandler(s.ResetUserPassword), oper("用户管理", "重置密码"), perm("system:user:resetPwd")))
-	mux.Handle("DELETE /api/system/users/{id}", framework.Handle(mgmtDeleteHandler(s.DeleteUser), oper("用户管理", "删除"), perm("system:user:remove")))
+	mux.Handle("GET /api/system/users/export", framework.Handle(mgmtExportHandler("users.csv", "status", s.ExportUsers), perm("system:user:list")))
+	mux.Handle("POST /api/system/users", framework.Handle(mgmtCreateHandler(s.CreateUser), oper("后台账号", "新增"), perm("system:user:add")))
+	mux.Handle("PUT /api/system/users/{id}", framework.Handle(mgmtUpdateHandler(s.UpdateUser), oper("后台账号", "修改"), perm("system:user:edit")))
+	mux.Handle("PUT /api/system/users/{id}/status", framework.Handle(mgmtUpdateHandler(s.UpdateUserStatus), oper("后台账号", "状态变更"), perm("system:user:edit")))
+	mux.Handle("PUT /api/system/users/{id}/password", framework.Handle(mgmtUpdateHandler(s.ResetUserPassword), oper("后台账号", "重置密码"), perm("system:user:resetPwd")))
+	mux.Handle("DELETE /api/system/users/{id}", framework.Handle(mgmtDeleteHandler(s.DeleteUser), oper("后台账号", "删除"), perm("system:user:remove")))
 
 	// ---------- 角色 ----------
 	mux.Handle("GET /api/system/roles/export", framework.Handle(mgmtExportHandler("roles.csv", "status", s.ExportRoles), perm("system:role:list")))
@@ -1296,20 +1111,6 @@ func RegisterManagementRoutes(mux *http.ServeMux, d Deps, s *ManagementService) 
 	mux.Handle("POST /api/system/menus", framework.Handle(mgmtCreateHandler(s.CreateMenu), oper("菜单管理", "新增"), perm("system:menu:add")))
 	mux.Handle("PUT /api/system/menus/{id}", framework.Handle(mgmtUpdateHandler(s.UpdateMenu), oper("菜单管理", "修改"), perm("system:menu:edit")))
 	mux.Handle("DELETE /api/system/menus/{id}", framework.Handle(mgmtDeleteHandler(s.DeleteMenu), oper("菜单管理", "删除"), perm("system:menu:remove")))
-
-	// ---------- 部门 ----------
-	mux.Handle("GET /api/system/depts/export", framework.Handle(mgmtExportHandler("depts.csv", "status", s.ExportDepts), perm("system:dept:list")))
-	mux.Handle("GET /api/system/depts/tree", framework.Handle(mgmtTreeHandler(s.Depts), perm("system:dept:list")))
-	mux.Handle("POST /api/system/depts", framework.Handle(mgmtCreateHandler(s.CreateDept), oper("部门管理", "新增"), perm("system:dept:add")))
-	mux.Handle("PUT /api/system/depts/{id}", framework.Handle(mgmtUpdateHandler(s.UpdateDept), oper("部门管理", "修改"), perm("system:dept:edit")))
-	mux.Handle("DELETE /api/system/depts/{id}", framework.Handle(mgmtDeleteHandler(s.DeleteDept), oper("部门管理", "删除"), perm("system:dept:remove")))
-
-	// ---------- 岗位 ----------
-	mux.Handle("GET /api/system/posts/export", framework.Handle(mgmtExportHandler("posts.csv", "status", s.ExportPosts), perm("system:post:list")))
-	mux.Handle("GET /api/system/posts", framework.Handle(mgmtPageHandler("status", s.Posts), perm("system:post:list")))
-	mux.Handle("POST /api/system/posts", framework.Handle(mgmtCreateHandler(s.CreatePost), oper("岗位管理", "新增"), perm("system:post:add")))
-	mux.Handle("PUT /api/system/posts/{id}", framework.Handle(mgmtUpdateHandler(s.UpdatePost), oper("岗位管理", "修改"), perm("system:post:edit")))
-	mux.Handle("DELETE /api/system/posts/{id}", framework.Handle(mgmtDeleteHandler(s.DeletePost), oper("岗位管理", "删除"), perm("system:post:remove")))
 
 	// ---------- 字典 ----------
 	mux.Handle("GET /api/system/dict/types/export", framework.Handle(mgmtExportHandler("dict-types.csv", "status", s.ExportDictTypes), perm("system:dict:list")))

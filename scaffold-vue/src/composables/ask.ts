@@ -50,14 +50,14 @@ const traceTo = (kind: 'user' | 'role' | 'menu', id: number): RouteLocationRaw |
 
 registerIntent({
   id: 'perm.who',
-  question: '谁能删除用户？',
+  question: '谁能删除后台账号？',
   patterns: [/谁(能|可以|有权)/, /哪些(人|角色)(能|可以)/, /[a-z]+:[a-z]+:[a-zA-Z]+/],
   permission: 'system:role:list',
   async run(question) {
     const index = await loadPermissionGraph()
     const code = permissionFromQuestion(question)
     const menus = code ? findMenusByPermission(index, code) : []
-    if (!menus.length) return [{ tone: 'warn', title: '没有找到对应权限', text: code ? `系统里没有权限标识「${code}」。` : '请说明动作和对象，例如「谁能导出操作日志」。' }]
+    if (!menus.length) return [{ tone: 'warn', title: '没有找到对应权限', text: code ? `系统里没有权限标识「${code}」。` : '请说明动作和对象，例如「谁能新增应用」。' }]
     return menus.slice(0, 3).map((menu) => {
       const { roles, users } = holdersOfMenu(index, menu.id)
       const path = menuPath(index, menu.id).map(m => m.name).join(' / ')
@@ -67,7 +67,7 @@ registerIntent({
         text: `${path}。${roles.length} 个角色授予，${index.graph.usersVisible ? `覆盖 ${users.length} 名用户` : '无用户查询权限，未统计人数'}。`,
         chips: [
           ...roles.map(r => ({ key: `r${r.id}`, label: r.name, sub: r.code, to: traceTo('role', r.id) })),
-          ...users.slice(0, 8).map(u => ({ key: `u${u.id}`, label: u.nickname, sub: u.deptName ?? '', to: traceTo('user', u.id) })),
+          ...users.slice(0, 8).map(u => ({ key: `u${u.id}`, label: u.nickname, sub: `@${u.username}`, to: traceTo('user', u.id) })),
         ],
       } satisfies AnswerCard
     })
@@ -103,7 +103,7 @@ registerIntent({
       tone: usersWithoutRole.length ? 'warn' : 'ok',
       title: '未分配角色的用户',
       text: usersWithoutRole.length ? `${usersWithoutRole.length} 名用户登录后看不到任何菜单。` : '所有可见用户都已分配角色。',
-      chips: usersWithoutRole.slice(0, 16).map(u => ({ key: `u${u.id}`, label: u.nickname, sub: u.deptName ?? '', to: traceTo('user', u.id) })),
+      chips: usersWithoutRole.slice(0, 16).map(u => ({ key: `u${u.id}`, label: u.nickname, sub: `@${u.username}`, to: traceTo('user', u.id) })),
     }]
   },
 })
@@ -138,7 +138,7 @@ registerIntent({
     return [{
       tone: overlapUsers.length ? 'warn' : 'ok',
       title: '多角色叠加',
-      text: overlapUsers.length ? `${overlapUsers.length} 名用户同时持有 3 个及以上启用角色，权限可能超出岗位需要。` : '没有用户叠加 3 个及以上角色。',
+      text: overlapUsers.length ? `${overlapUsers.length} 名用户同时持有 3 个及以上启用角色，权限可能超出实际需要。` : '没有用户叠加 3 个及以上角色。',
       chips: overlapUsers.map(({ user, roles }) => ({ key: `u${user.id}`, label: user.nickname, sub: `${roles.length} 个角色`, to: traceTo('user', user.id) })),
     }]
   },

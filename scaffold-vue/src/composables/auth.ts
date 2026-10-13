@@ -4,7 +4,6 @@ import { ApiError, authApi, authSession, type CurrentUser, type LoginRequest, ty
 import { setPermissions } from '@/directives/permission'
 import type { NavGroup, NavLeaf } from '@/data'
 import { clearDictCache } from './dict'
-import { clearDeptCache } from './dept'
 
 /* ============================================================
    登录态、权限与动态菜单。
@@ -37,11 +36,14 @@ setPermissions(currentUser.value?.permissions ?? [])
 /** sys_menu.component 的取值必须在此登记 */
 const COMPONENT_MAP: Record<string, () => Promise<{ default: Component }>> = {
   'dashboard/index': () => import('@/views/Dashboard.vue'),
+  'platform/app/index': () => import('@/views/platform/Apps.vue'),
+  'platform/user/index': () => import('@/views/platform/AppUsers.vue'),
+  'platform/field/index': () => import('@/views/platform/Fields.vue'),
+  'platform/counterlog/index': () => import('@/views/platform/CounterLogs.vue'),
+  'platform/authlog/index': () => import('@/views/platform/AuthLogs.vue'),
   'system/user/index': () => import('@/views/system/Users.vue'),
   'system/role/index': () => import('@/views/system/Roles.vue'),
   'system/menu/index': () => import('@/views/system/Menus.vue'),
-  'system/dept/index': () => import('@/views/system/Depts.vue'),
-  'system/post/index': () => import('@/views/system/Posts.vue'),
   'system/dict/index': () => import('@/views/system/Dict.vue'),
   'system/config/index': () => import('@/views/system/Configs.vue'),
   'monitor/operlog/index': () => import('@/views/monitor/OperLog.vue'),
@@ -160,7 +162,6 @@ export function clearSession() {
   setPermissions([])
   authSession.clear()
   clearDictCache()
-  clearDeptCache()
 }
 
 export async function logout() {

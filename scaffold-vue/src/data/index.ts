@@ -2,11 +2,11 @@
    品牌与全局配置：换品牌只改这里。
    ============================================================ */
 export const APP = Object.freeze({
-  name: '通用后台管理系统',
-  shortName: '管理后台',
-  subtitle: 'Admin Console',
+  name: '用户中心平台',
+  shortName: '用户中心',
+  subtitle: 'User Center',
   version: 'v1.0.0',
-  copyright: `© ${new Date().getFullYear()} 通用后台管理系统`,
+  copyright: `© ${new Date().getFullYear()} 用户中心平台`,
 })
 
 /* ── 导航 ─────────────────────────────────────────────────── */
@@ -45,17 +45,6 @@ export interface Menu extends BaseRow {
   visible?: number
   sort?: number
   children?: Menu[]
-}
-
-export interface Dept extends BaseRow {
-  name: string
-  parentId: number
-  leader?: string
-  phone?: string
-  email?: string
-  sort?: number
-  memberCount?: number
-  children?: Dept[]
 }
 
 /** 头像底色：由名称稳定映射，避免同一个人每次颜色不同 */

@@ -8,7 +8,16 @@ server {
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/javascript image/svg+xml;
 
-    # 后端接口：与开发时 Vite 代理同样的前缀
+    # 开放接口（接入方调用）与后端管理接口：都转发到后端
+    location /open/ {
+        proxy_pass http://${BACKEND_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
     location /api/ {
         proxy_pass http://${BACKEND_UPSTREAM};
         proxy_http_version 1.1;

@@ -7,79 +7,65 @@ import (
 )
 
 // 对应 Java SystemManagementMapper：每条语句原样搬运，#{x} → ?，参数按出现顺序重复。
-// selectUserProfileByUsername / selectActiveRoleScopes / selectDeptAndChildIds / selectRoleDeptIds 已在 datascope.go。
 
-// mgmtScopeClause 对应 <script> 中的数据范围片段：
-// #{scope.allScope} = TRUE OR u.id = #{scope.userId} [OR u.dept_id IN (...)]
-func mgmtScopeClause(scope framework.DataScopeCriteria) (string, []any) {
-	clause := "? = TRUE OR u.id = ?"
-	args := []any{scope.AllScope, scope.UserID}
-	if len(scope.DeptIDs) > 0 {
-		clause += " OR u.dept_id IN (" + framework.In(len(scope.DeptIDs)) + ")"
-		args = append(args, framework.Int64Args(scope.DeptIDs)...)
-	}
-	return clause, args
-}
-
-// mgmtUserFilterArgs 为 countUsers / selectUsers 共用的 WHERE 参数：keyword×5, status×2, deptId×3, postId×2, scope...
-func mgmtUserFilterArgs(keyword *string, status *int, deptID, postID *int64, scopeArgs []any) []any {
-	args := []any{keyword, keyword, keyword, keyword, keyword, status, status, deptID, deptID, deptID, postID, postID}
-	return append(args, scopeArgs...)
+// mgmtUserFilterArgs 为 countUsers / selectUsers 共用的 WHERE 参数：keyword×5, status×2
+func mgmtUserFilterArgs(keyword *string, status *int) []any {
+	return []any{keyword, keyword, keyword, keyword, keyword, status, status}
 }
 
 // countUsers
-func mgmtCountUsers(ctx context.Context, q framework.Querier, keyword *string, status *int, deptID, postID *int64, scope framework.DataScopeCriteria) (int64, error) {
-	clause, scopeArgs := mgmtScopeClause(scope)
+func mgmtCountUsers(ctx context.Context, q framework.Querier, keyword *string, status *int) (int64, error) {
 	return framework.SelectInt64(ctx, q, `
-		SELECT COUNT(DISTINCT u.id)
+		SELECT COUNT(*)
 		FROM sys_user u
-		LEFT JOIN sys_dept d ON d.id = u.dept_id
 		WHERE u.deleted = 0
 		  AND (? IS NULL OR ? = ''
 		       OR u.username LIKE CONCAT('%', ?, '%')
 		       OR u.nickname LIKE CONCAT('%', ?, '%')
 		       OR u.phone LIKE CONCAT('%', ?, '%'))
-		  AND (? IS NULL OR u.status = ?)
-		  AND (? IS NULL OR u.dept_id IN (SELECT sd.id FROM sys_dept sd WHERE sd.id = ? OR FIND_IN_SET(?, sd.ancestors)))
-		  AND (? IS NULL OR EXISTS (SELECT 1 FROM sys_user_post fup WHERE fup.user_id = u.id AND fup.post_id = ?))
-		  AND (`+clause+`)`,
-		mgmtUserFilterArgs(keyword, status, deptID, postID, scopeArgs)...)
+		  AND (? IS NULL OR u.status = ?)`,
+		mgmtUserFilterArgs(keyword, status)...)
 }
 
-// selectUsers
-func mgmtSelectUsers(ctx context.Context, q framework.Querier, keyword *string, status *int, deptID, postID *int64, scope framework.DataScopeCriteria, offset, pageSize int) ([]framework.Row, error) {
-	clause, scopeArgs := mgmtScopeClause(scope)
+// selectUsers：appIdsText / appNames 来自 sys_user_app，调用方用 mgmtUserRows 把 appIdsText 拆为 appIds。
+func mgmtSelectUsers(ctx context.Context, q framework.Querier, keyword *string, status *int, offset, pageSize int) ([]framework.Row, error) {
 	return framework.SelectRows(ctx, q, `
 		SELECT u.id,
 		       u.username,
 		       u.nickname,
 		       u.phone,
 		       u.email,
-		       d.dept_name AS deptName,
-		       COALESCE(GROUP_CONCAT(DISTINCT p.post_name ORDER BY p.sort, p.id SEPARATOR ','), '') AS postName,
 		       COALESCE(GROUP_CONCAT(DISTINCT r.role_name ORDER BY r.sort, r.id SEPARATOR ','), '') AS roleName,
+		       COALESCE(GROUP_CONCAT(DISTINCT a.id ORDER BY a.id SEPARATOR ','), '') AS appIdsText,
+		       COALESCE(GROUP_CONCAT(DISTINCT a.app_name ORDER BY a.id SEPARATOR ','), '') AS appNames,
 		       u.status,
 		       DATE_FORMAT(u.create_time, '%Y-%m-%d %H:%i') AS createTime,
 		       DATE_FORMAT(u.last_login_time, '%Y-%m-%d %H:%i') AS lastLogin
 		FROM sys_user u
-		LEFT JOIN sys_dept d ON d.id = u.dept_id
-		LEFT JOIN sys_user_post up ON up.user_id = u.id
-		LEFT JOIN sys_post p ON p.id = up.post_id AND p.deleted = 0
 		LEFT JOIN sys_user_role ur ON ur.user_id = u.id
 		LEFT JOIN sys_role r ON r.id = ur.role_id AND r.deleted = 0
+		LEFT JOIN sys_user_app ua ON ua.user_id = u.id
+		LEFT JOIN app_info a ON a.id = ua.app_id AND a.deleted = 0
 		WHERE u.deleted = 0
 		  AND (? IS NULL OR ? = ''
 		       OR u.username LIKE CONCAT('%', ?, '%')
 		       OR u.nickname LIKE CONCAT('%', ?, '%')
 		       OR u.phone LIKE CONCAT('%', ?, '%'))
 		  AND (? IS NULL OR u.status = ?)
-		  AND (? IS NULL OR u.dept_id IN (SELECT sd.id FROM sys_dept sd WHERE sd.id = ? OR FIND_IN_SET(?, sd.ancestors)))
-		  AND (? IS NULL OR EXISTS (SELECT 1 FROM sys_user_post fup WHERE fup.user_id = u.id AND fup.post_id = ?))
-		  AND (`+clause+`)
-		GROUP BY u.id, u.username, u.nickname, u.phone, u.email, d.dept_name, u.status, u.create_time, u.last_login_time
+		GROUP BY u.id, u.username, u.nickname, u.phone, u.email, u.status, u.create_time, u.last_login_time
 		ORDER BY u.id
 		LIMIT ?, ?`,
-		append(mgmtUserFilterArgs(keyword, status, deptID, postID, scopeArgs), offset, pageSize)...)
+		append(mgmtUserFilterArgs(keyword, status), offset, pageSize)...)
+}
+
+// selectAppOptions：users/options 与后台账号表单的可选应用；非 super_admin 只返回已绑定的应用。
+func mgmtSelectAppOptions(ctx context.Context, q framework.Querier, scope appScope) ([]framework.Row, error) {
+	clause, args := scope.clause("a.id")
+	return framework.SelectRows(ctx, q, `
+		SELECT a.id, a.app_code AS code, a.app_name AS name
+		FROM app_info a
+		WHERE a.deleted = 0`+clause+`
+		ORDER BY a.id`, args...)
 }
 
 // countRoles
@@ -101,13 +87,6 @@ func mgmtSelectRoles(ctx context.Context, q framework.Querier, keyword *string, 
 		SELECT r.id,
 		       r.role_name AS name,
 		       r.role_code AS code,
-		       CASE r.data_scope
-		           WHEN 'ALL' THEN '全部数据权限'
-		           WHEN 'DEPT_AND_CHILD' THEN '本部门及以下'
-		           WHEN 'DEPT' THEN '本部门数据权限'
-		           WHEN 'CUSTOM' THEN '自定义数据权限'
-		           ELSE '仅本人数据权限'
-		       END AS dataScope,
 		       (SELECT COUNT(*) FROM sys_user_role ur JOIN sys_user cu ON cu.id = ur.user_id AND cu.deleted = 0 WHERE ur.role_id = r.id) AS userCount,
 		       r.sort,
 		       r.status,
@@ -149,63 +128,6 @@ func mgmtSelectMenus(ctx context.Context, q framework.Querier, keyword *string, 
 		  AND (? IS NULL OR m.status = ?)
 		ORDER BY m.parent_id, m.sort, m.id`,
 		keyword, keyword, keyword, keyword, status, status)
-}
-
-// selectDepts
-func mgmtSelectDepts(ctx context.Context, q framework.Querier, keyword *string, status *int) ([]framework.Row, error) {
-	return framework.SelectRows(ctx, q, `
-		SELECT d.id,
-		       d.parent_id AS parentId,
-		       d.dept_name AS name,
-		       d.leader,
-		       d.phone,
-		       d.email,
-		       d.sort,
-		       d.status,
-		       (SELECT COUNT(*) FROM sys_user u WHERE u.dept_id = d.id AND u.deleted = 0) AS memberCount
-		FROM sys_dept d
-		WHERE d.deleted = 0
-		  AND (? IS NULL OR ? = ''
-		       OR d.dept_name LIKE CONCAT('%', ?, '%')
-		       OR d.leader LIKE CONCAT('%', ?, '%'))
-		  AND (? IS NULL OR d.status = ?)
-		ORDER BY d.parent_id, d.sort, d.id`,
-		keyword, keyword, keyword, keyword, status, status)
-}
-
-// countPosts
-func mgmtCountPosts(ctx context.Context, q framework.Querier, keyword *string, status *int) (int64, error) {
-	return framework.SelectInt64(ctx, q, `
-		SELECT COUNT(*)
-		FROM sys_post p
-		WHERE p.deleted = 0
-		  AND (? IS NULL OR ? = ''
-		       OR p.post_name LIKE CONCAT('%', ?, '%')
-		       OR p.post_code LIKE CONCAT('%', ?, '%'))
-		  AND (? IS NULL OR p.status = ?)`,
-		keyword, keyword, keyword, keyword, status, status)
-}
-
-// selectPosts
-func mgmtSelectPosts(ctx context.Context, q framework.Querier, keyword *string, status *int, offset, pageSize int) ([]framework.Row, error) {
-	return framework.SelectRows(ctx, q, `
-		SELECT p.id,
-		       p.post_code AS postCode,
-		       p.post_name AS postName,
-		       p.sort,
-		       p.status,
-		       p.remark,
-		       DATE_FORMAT(p.create_time, '%Y-%m-%d %H:%i') AS createTime,
-		       (SELECT COUNT(*) FROM sys_user_post up JOIN sys_user cu ON cu.id = up.user_id AND cu.deleted = 0 WHERE up.post_id = p.id) AS userCount
-		FROM sys_post p
-		WHERE p.deleted = 0
-		  AND (? IS NULL OR ? = ''
-		       OR p.post_name LIKE CONCAT('%', ?, '%')
-		       OR p.post_code LIKE CONCAT('%', ?, '%'))
-		  AND (? IS NULL OR p.status = ?)
-		ORDER BY p.sort, p.id
-		LIMIT ?, ?`,
-		keyword, keyword, keyword, keyword, status, status, offset, pageSize)
 }
 
 // countDictTypes
@@ -321,7 +243,6 @@ func mgmtSelectOperLogs(ctx context.Context, q framework.Querier, keyword *strin
 		       l.request_url AS url,
 		       l.request_params AS params,
 		       l.oper_name AS operName,
-		       l.dept_name AS dept,
 		       l.ip,
 		       l.location,
 		       l.cost,
@@ -397,43 +318,6 @@ func mgmtClearLoginLogs(ctx context.Context, q framework.Querier) (int64, error)
 	return framework.Exec(ctx, q, `DELETE FROM sys_login_log`)
 }
 
-// countPostCode
-func mgmtCountPostCode(ctx context.Context, q framework.Querier, postCode string, excludeID *int64) (int64, error) {
-	return framework.SelectInt64(ctx, q, `
-		SELECT COUNT(*)
-		FROM sys_post
-		WHERE post_code = ?
-		  AND deleted = 0
-		  AND (? IS NULL OR id <> ?)`, postCode, excludeID, excludeID)
-}
-
-// insertPost
-func mgmtInsertPost(ctx context.Context, q framework.Querier, postCode, postName string, sort, status int, remark *string, operator string) (int64, error) {
-	return framework.Insert(ctx, q, `
-		INSERT INTO sys_post (post_code, post_name, sort, status, remark, create_by, update_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, postCode, postName, sort, status, remark, operator, operator)
-}
-
-// updatePost
-func mgmtUpdatePost(ctx context.Context, q framework.Querier, id int64, postName *string, sort, status *int, remark *string, operator string) (int64, error) {
-	return framework.Exec(ctx, q, `
-		UPDATE sys_post
-		SET post_name = COALESCE(?, post_name),
-		    sort = COALESCE(?, sort),
-		    status = COALESCE(?, status),
-		    remark = COALESCE(?, remark),
-		    update_by = ?
-		WHERE id = ? AND deleted = 0`, postName, sort, status, remark, operator, id)
-}
-
-// softDeletePost
-func mgmtSoftDeletePost(ctx context.Context, q framework.Querier, id int64, operator string) (int64, error) {
-	return framework.Exec(ctx, q, `
-		UPDATE sys_post
-		SET deleted = 1, update_by = ?
-		WHERE id = ? AND deleted = 0`, operator, id)
-}
-
 // countUsername
 func mgmtCountUsername(ctx context.Context, q framework.Querier, username string, excludeID *int64) (int64, error) {
 	return framework.SelectInt64(ctx, q, `
@@ -445,23 +329,22 @@ func mgmtCountUsername(ctx context.Context, q framework.Querier, username string
 }
 
 // insertUser
-func mgmtInsertUser(ctx context.Context, q framework.Querier, username, password, nickname string, phone, email *string, deptID *int64, status int, operator string) (int64, error) {
+func mgmtInsertUser(ctx context.Context, q framework.Querier, username, password, nickname string, phone, email *string, status int, operator string) (int64, error) {
 	return framework.Insert(ctx, q, `
-		INSERT INTO sys_user (username, password, nickname, phone, email, dept_id, status, create_by, update_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, username, password, nickname, phone, email, deptID, status, operator, operator)
+		INSERT INTO sys_user (username, password, nickname, phone, email, status, create_by, update_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, username, password, nickname, phone, email, status, operator, operator)
 }
 
 // updateUser
-func mgmtUpdateUser(ctx context.Context, q framework.Querier, id int64, nickname, phone, email *string, deptID *int64, status *int, operator string) (int64, error) {
+func mgmtUpdateUser(ctx context.Context, q framework.Querier, id int64, nickname, phone, email *string, status *int, operator string) (int64, error) {
 	return framework.Exec(ctx, q, `
 		UPDATE sys_user
 		SET nickname = COALESCE(?, nickname),
 		    phone = COALESCE(?, phone),
 		    email = COALESCE(?, email),
-		    dept_id = COALESCE(?, dept_id),
 		    status = COALESCE(?, status),
 		    update_by = ?
-		WHERE id = ? AND deleted = 0`, nickname, phone, email, deptID, status, operator, id)
+		WHERE id = ? AND deleted = 0`, nickname, phone, email, status, operator, id)
 }
 
 // updateUserStatus
@@ -500,15 +383,15 @@ func mgmtInsertUserRole(ctx context.Context, q framework.Querier, userID, roleID
 	return err
 }
 
-// deleteUserPosts
-func mgmtDeleteUserPosts(ctx context.Context, q framework.Querier, userID int64) error {
-	_, err := framework.Exec(ctx, q, `DELETE FROM sys_user_post WHERE user_id = ?`, userID)
+// deleteUserApps
+func mgmtDeleteUserApps(ctx context.Context, q framework.Querier, userID int64) error {
+	_, err := framework.Exec(ctx, q, `DELETE FROM sys_user_app WHERE user_id = ?`, userID)
 	return err
 }
 
-// insertUserPost
-func mgmtInsertUserPost(ctx context.Context, q framework.Querier, userID, postID int64) error {
-	_, err := framework.Exec(ctx, q, `INSERT IGNORE INTO sys_user_post (user_id, post_id) VALUES (?, ?)`, userID, postID)
+// insertUserApp
+func mgmtInsertUserApp(ctx context.Context, q framework.Querier, userID, appID int64) error {
+	_, err := framework.Exec(ctx, q, `INSERT IGNORE INTO sys_user_app (user_id, app_id) VALUES (?, ?)`, userID, appID)
 	return err
 }
 
@@ -523,23 +406,22 @@ func mgmtCountRoleCode(ctx context.Context, q framework.Querier, code string, ex
 }
 
 // insertRole
-func mgmtInsertRole(ctx context.Context, q framework.Querier, name, code, dataScope string, sort, status int, remark *string, operator string) (int64, error) {
+func mgmtInsertRole(ctx context.Context, q framework.Querier, name, code string, sort, status int, remark *string, operator string) (int64, error) {
 	return framework.Insert(ctx, q, `
-		INSERT INTO sys_role (role_name, role_code, data_scope, sort, status, builtin, remark, create_by, update_by)
-		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`, name, code, dataScope, sort, status, remark, operator, operator)
+		INSERT INTO sys_role (role_name, role_code, sort, status, builtin, remark, create_by, update_by)
+		VALUES (?, ?, ?, ?, 0, ?, ?, ?)`, name, code, sort, status, remark, operator, operator)
 }
 
 // updateRole
-func mgmtUpdateRole(ctx context.Context, q framework.Querier, id int64, name, dataScope *string, sort, status *int, remark *string, operator string) (int64, error) {
+func mgmtUpdateRole(ctx context.Context, q framework.Querier, id int64, name *string, sort, status *int, remark *string, operator string) (int64, error) {
 	return framework.Exec(ctx, q, `
 		UPDATE sys_role
 		SET role_name = COALESCE(?, role_name),
-		    data_scope = COALESCE(?, data_scope),
 		    sort = COALESCE(?, sort),
 		    status = COALESCE(?, status),
 		    remark = COALESCE(?, remark),
 		    update_by = ?
-		WHERE id = ? AND deleted = 0 AND builtin = 0`, name, dataScope, sort, status, remark, operator, id)
+		WHERE id = ? AND deleted = 0 AND builtin = 0`, name, sort, status, remark, operator, id)
 }
 
 // softDeleteRole
@@ -567,17 +449,14 @@ func mgmtSelectRoleMenuIDs(ctx context.Context, q framework.Querier, roleID int6
 	return framework.SelectInt64s(ctx, q, `SELECT menu_id FROM sys_role_menu WHERE role_id = ? ORDER BY menu_id`, roleID)
 }
 
-// selectGraphUsers：权限关系图的用户节点，遵守数据权限，只取图谱展示所需字段。
-func mgmtSelectGraphUsers(ctx context.Context, q framework.Querier, scope framework.DataScopeCriteria) ([]framework.Row, error) {
-	clause, args := mgmtScopeClause(scope)
+// selectGraphUsers：权限关系图的用户节点，只取图谱展示所需字段。
+func mgmtSelectGraphUsers(ctx context.Context, q framework.Querier) ([]framework.Row, error) {
 	return framework.SelectRows(ctx, q, `
-		SELECT u.id, u.username, u.nickname, d.dept_name AS deptName, u.status
+		SELECT u.id, u.username, u.nickname, u.status
 		FROM sys_user u
-		LEFT JOIN sys_dept d ON d.id = u.dept_id
 		WHERE u.deleted = 0
-		  AND (`+clause+`)
 		ORDER BY u.id
-		LIMIT 2000`, args...)
+		LIMIT 2000`)
 }
 
 // selectUserRoleLinks
@@ -597,59 +476,6 @@ func mgmtCountRoleUsers(ctx context.Context, q framework.Querier, roleID int64) 
 		FROM sys_user_role ur
 		JOIN sys_user u ON u.id = ur.user_id
 		WHERE ur.role_id = ? AND u.deleted = 0`, roleID)
-}
-
-// selectDeptAncestors：无行或列为 NULL 均返回 nil（对应 Java 返回 null）。
-func mgmtSelectDeptAncestors(ctx context.Context, q framework.Querier, id int64) (*string, error) {
-	row, err := framework.SelectRow(ctx, q, `
-		SELECT ancestors
-		FROM sys_dept
-		WHERE id = ? AND deleted = 0`, id)
-	if err != nil || row == nil {
-		return nil, err
-	}
-	return strPtr(row["ancestors"]), nil
-}
-
-// insertDept
-func mgmtInsertDept(ctx context.Context, q framework.Querier, parentID int64, ancestors, name string, leader, phone, email *string, sort, status int, operator string) (int64, error) {
-	return framework.Insert(ctx, q, `
-		INSERT INTO sys_dept (parent_id, ancestors, dept_name, leader, phone, email, sort, status, create_by, update_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, parentID, ancestors, name, leader, phone, email, sort, status, operator, operator)
-}
-
-// updateDept
-func mgmtUpdateDept(ctx context.Context, q framework.Querier, id int64, parentID *int64, ancestors, name, leader, phone, email *string, sort, status *int, operator string) (int64, error) {
-	return framework.Exec(ctx, q, `
-		UPDATE sys_dept
-		SET parent_id = COALESCE(?, parent_id),
-		    ancestors = COALESCE(?, ancestors),
-		    dept_name = COALESCE(?, dept_name),
-		    leader = COALESCE(?, leader),
-		    phone = COALESCE(?, phone),
-		    email = COALESCE(?, email),
-		    sort = COALESCE(?, sort),
-		    status = COALESCE(?, status),
-		    update_by = ?
-		WHERE id = ? AND deleted = 0`, parentID, ancestors, name, leader, phone, email, sort, status, operator, id)
-}
-
-// softDeleteDept
-func mgmtSoftDeleteDept(ctx context.Context, q framework.Querier, id int64, operator string) (int64, error) {
-	return framework.Exec(ctx, q, `
-		UPDATE sys_dept
-		SET deleted = 1, update_by = ?
-		WHERE id = ? AND deleted = 0`, operator, id)
-}
-
-// countDeptChildren
-func mgmtCountDeptChildren(ctx context.Context, q framework.Querier, deptID int64) (int64, error) {
-	return framework.SelectInt64(ctx, q, `SELECT COUNT(*) FROM sys_dept WHERE parent_id = ? AND deleted = 0`, deptID)
-}
-
-// countDeptUsers
-func mgmtCountDeptUsers(ctx context.Context, q framework.Querier, deptID int64) (int64, error) {
-	return framework.SelectInt64(ctx, q, `SELECT COUNT(*) FROM sys_user WHERE dept_id = ? AND deleted = 0`, deptID)
 }
 
 // nextMenuId

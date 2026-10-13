@@ -8,8 +8,6 @@ export const ICON_PATHS: Record<string, string> = {
   role: 'M12 3 5 6v5c0 4.4 3 8.4 7 10 4-1.6 7-5.6 7-10V6l-7-3zm-3 9 2 2 4-4',
   shield: 'M12 3 5 6v5c0 4.4 3 8.4 7 10 4-1.6 7-5.6 7-10V6l-7-3z',
   menu: 'M4 6h16M4 12h16M4 18h10',
-  dept: 'M12 3v5m-7 4V9h14v3M5 21v-6H2v6h3zm8.5 0v-6h-3v6h3zM22 21v-6h-3v6h3z',
-  post: 'M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 8h18v11H3V8zm0 5h18',
   dict: 'M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15zm0 15A1.5 1.5 0 0 0 6.5 21H19M9 7h6m-6 4h4',
   log: 'M6 3h9l4 4v14H6V3zm8 0v5h5M9 12h7m-7 4h5',
   file: 'M6 3h9l4 4v14H6V3zm8 0v5h5',
@@ -75,7 +73,7 @@ export const ICON_PATHS: Record<string, string> = {
 
 /** 菜单图标可选项（菜单管理表单使用） */
 export const MENU_ICON_OPTIONS = [
-  'dashboard', 'gear', 'users', 'user', 'role', 'shield', 'menu', 'dept', 'post', 'dict', 'log', 'file',
+  'dashboard', 'gear', 'users', 'user', 'role', 'shield', 'menu', 'dict', 'log', 'file',
   'lock', 'tool', 'command', 'code', 'database', 'monitor', 'layers', 'grid', 'home', 'chart', 'activity',
   'clock', 'bell', 'mail', 'key', 'sliders',
 ]

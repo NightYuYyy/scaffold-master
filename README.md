@@ -1,129 +1,103 @@
-# 通用后台管理脚手架
+# 用户中心平台
 
-用于后续后台管理系统开发的 Spring Boot + Vue 底座。包含认证、菜单与按钮权限、数据权限、组织管理、字典、参数、日志、工作台和代码生成骨架；新增项目在此基础上实现业务模块。
+一个可以被多个业务项目共用的账号与用户数据平台：业务项目在控制台注册为「应用」，用平台的开放接口完成用户注册登录，并按应用配置扩展字段（等级、邀请码……）和数值账户（积分、币……）。平台自带运营控制台，管理应用、应用用户、字段、流水和日志。
+
+```text
+业务项目前端 ──X-App-Key──▶ /open/v1  注册 / 登录 / 我的信息 / 改资料
+业务项目后端 ──X-App-Key + X-App-Secret──▶ /open/v1  用户管理 / 账户加减 / 令牌内省
+运营人员 ──浏览器──▶ 控制台（scaffold-vue）──▶ /api  应用 / 用户 / 字段 / 流水 / 日志 / 后台账号与权限
+```
+
+用户 token 用应用自己的密钥签发（HS256），业务后端可本地验签，不必每次回调平台。
 
 ## 开发入口
 
-- [项目地图](PROJECT_MAP.md)：按功能定位页面、接口、服务、SQL 和权限。
-- [设计规范](DESIGN.md)：珍珠玻璃主题、组件复用及交互规范。
+- [接口契约](docs/platform-api.md)：开放接口与管理接口的字段、错误提示与规则，接入方只需看这一份。
+- [项目地图](PROJECT_MAP.md)：按功能定位页面、接口、SQL 和权限码。
+- [后端架构](docs/backend-architecture.md)、[前后端接口约定](docs/frontend-backend-integration.md)、[前端架构](docs/admin-redesign-architecture.md)、[设计规范](DESIGN.md)。
 - [开发约定](AGENTS.md)、[更新日志](changelog.md)。
-- [后端架构](docs/backend-architecture.md)、[前后端接口约定](docs/frontend-backend-integration.md)、[前端架构](docs/admin-redesign-architecture.md)。
 
 ## 目录与技术栈
 
 | 目录 | 用途 | 技术栈 |
 | --- | --- | --- |
-| `scaffold-system` | 后端 Maven 多模块工程 | Java 17+、Spring Boot 3.5、MyBatis、MySQL、Redis、JWT |
-| `scaffold-go` | 后端 Go 等价实现，接口与 `scaffold-system` 完全一致，前端可直接切换 | Go 1.22+ 标准库 `net/http`、`database/sql`、MySQL、Redis、JWT |
-| `scaffold-vue` | 管理后台 | Vue 3、TypeScript、Vite 6、Vue Router 4、GSAP 3，自有组件库 |
-| `scaffold-system/sql` | 首次初始化脚本 | `V1__init_schema.sql` 建表，`V2__seed_data.sql` 初始化数据 |
-| `docs` | 当前架构说明 | 后端架构、前后端接口约定和前端组件架构 |
-
-当前包含工作台和 10 个管理页面；建筑、工作流模块已移除。
+| `scaffold-go` | 后端：开放接口、管理接口、控制台认证与权限 | Go 1.26+ 标准库 `net/http` + `database/sql`、MySQL 8、Redis、JWT、bcrypt；仅 4 个直接使用的第三方库 |
+| `scaffold-vue` | 运营控制台 | Vue 3、TypeScript、Vite 6、Vue Router 4、GSAP 3，自有组件库 |
+| `sql` | 初始化脚本 | `V1__init_schema.sql` 建表（21 张），`V2__seed_data.sql` 初始数据与示例应用 |
+| `deploy` | 一键部署 | `docker-compose.yml` + `.env.example` |
+| `.github/workflows` | 自动构建镜像 | 推 `main` 或 `v*` 标签时构建前后端镜像推到 ghcr.io |
 
 ## 本地启动
 
-准备 JDK 17 或更新版本、Maven、Node.js 22+、MySQL 5.7+ 和 Redis；前后端依赖均使用项目现有配置。
+准备 Go 1.26+（与 `go.mod` / Dockerfile 一致）、Node.js 22+、MySQL 8 和 Redis。后端只读进程环境变量：
 
-后端读取进程环境变量，不会自动加载 `.env` 文件；可在 IDE 运行配置或启动终端中设置：
-
-| 变量 | 中文说明 | 默认值 |
+| 变量 | 说明 | 默认值 |
 | --- | --- | --- |
-| `JWT_SECRET` | JWT 签名密钥，至少 32 字节且不能全为空白 | 必填，无默认值 |
-| `DB_HOST` / `DB_PORT` | MySQL 地址 / 端口 | `localhost` / `3306` |
-| `DB_NAME` | 数据库名称 | `scaffold_system` |
-| `DB_USERNAME` / `DB_PASSWORD` | 数据库账号 / 密码 | 本地开发默认账号；按实际环境配置 |
-| `DB_TIMEZONE` | 数据库连接与会话时区 | `+08:00` |
-| `REDIS_HOST` / `REDIS_PORT` | Redis 地址 / 端口 | `localhost` / `6379` |
-| `REDIS_PASSWORD` | Redis 密码 | 空；按实际环境配置 |
-| `VITE_API_PROXY_TARGET` | 前端开发代理的后端地址 | `http://localhost:8080` |
-
-可在启动后端的终端中生成本机密钥；生成结果保留在当前进程环境，不写入仓库：
+| `JWT_SECRET` | 控制台登录的 JWT 密钥，至少 32 字节 | 必填 |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USERNAME` / `DB_PASSWORD` / `DB_TIMEZONE` | MySQL 连接 | `localhost` / `3306` / `scaffold_system` / `root` / `root` / `+08:00` |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis 连接 | `localhost` / `6379` / 空 |
+| `SERVER_PORT` | 监听端口 | `8080` |
+| `DB_AUTO_INIT` | 启动前执行 `sql/` 下的初始化脚本（幂等） | 空 |
+| `SQL_DIR` | 初始化脚本目录 | `../sql` |
 
 ```bash
-export JWT_SECRET="$(openssl rand -hex 32)"
-```
-
-使用 IDE 时将密钥配置到运行环境。未配置或不足 32 字节时后端启动失败；保留同一密钥可让重启前的有效 token 继续验签，更换密钥会使旧 token 失效。
-
-首次创建空的 `scaffold_system` 库后，按顺序导入两份 SQL；mysql 客户端须使用 `--default-character-set=utf8mb4`，并通过 `--init-command="SET time_zone='+08:00'"` 设置会话时区。也可在 IDE 运行 `scaffold-admin` 中的 `com.scaffold.admin.util.DbInit`，该工具使用同一组 `DB_*` 变量并按版本顺序初始化；参数 `fix` 会删除整个目标库，仅在核实库名、备份且明确同意重建时使用。
-
-```bash
-# 在 scaffold-system 目录构建与启动后端
-mvn -pl scaffold-admin -am package -DskipTests
-java -jar scaffold-admin/target/scaffold-admin-0.1.0-SNAPSHOT.jar
+# 初始化数据库（建库 + 建表 + 初始数据；可重复执行）
+cd scaffold-go && JWT_SECRET="$(openssl rand -hex 32)" go run ./cmd/server init-db
 ```
 
 ```bash
-# 或者启动 Go 版后端（同一套环境变量与数据库，监听同一端口 8080）；详见 scaffold-go/README.md
-cd scaffold-go && go run ./cmd/server
+# 启动后端，监听 8080
+cd scaffold-go && JWT_SECRET="$(openssl rand -hex 32)" go run ./cmd/server
 ```
 
 ```bash
-# 在 scaffold-vue 目录启动前端；首次使用先 npm ci
-npm run dev
+# 启动控制台，监听 5173；/api 与 /open 代理到后端
+cd scaffold-vue && npm ci && npm run dev
 ```
 
-浏览器访问 `http://localhost:5173`，后端本地端口为 `8080`；前端统一通过 `/api` 代理访问后端。
+控制台种子账号：`admin / admin123`（超级管理员）、`appadmin / admin123`（应用管理员，只能看示例应用）。种子里有一个示例应用 `demo`，密钥 `demo_pk_local` / `demo-secret-change-me-0123456789abcdef0123456789`，示例用户 `demo_user / admin123`。**接入真实环境前请删除示例应用、更换密钥与密码。**
 
-种子库管理员为 `admin`，开发密码为 `admin123`；仅用于本地开发，接入实际环境前请修改密码并配置自己的数据库与 Redis 凭据。种子组织和用户为示例，电话留空，邮箱使用 `example.com`。验证码使用页面显示的字符。超级管理员可见全部启用且可见的已注册菜单，并拥有全部操作权限；其余种子角色默认未授予菜单，需在角色管理中分配。无可用菜单的账号登录后显示“暂未分配可用菜单”。
+试一下开放接口（验证码与控制台一致，由客户端展示）：
 
-## 新业务模块
+```bash
+curl -s -H 'X-App-Key: demo_pk_local' http://localhost:8080/open/v1/captcha
+```
 
-1. 先设计业务表与中文字段含义；默认包含 `create_by`、`update_by`、`create_time`、`update_time` 四个审计字段。
-2. 复用 `scaffold-common` 的返回、分页与异常，以及 `scaffold-framework` 的权限、数据权限、操作日志能力。
-3. 前端列表复用 `ListPage`、`useListPage` / `useTreeListPage`；表单复用 `FormDialog`、`Field` 和现有控件，操作复用 `PermissionButton`。
-4. 在 `src/api` 接入统一 HTTP 客户端，在 `src/composables/auth.ts` 的 `COMPONENT_MAP` 注册页面，再添加菜单和按钮权限。
-5. 按角色配置菜单和数据范围，验证低权限账号的真实接口拒绝行为、查询、分页、导出及表单校验。
-6. 同步项目地图、相关接口说明和更新日志。
+## 接入一个新项目
 
-代码生成初始配置为空，按需导入当前数据库的真实表，支持字段信息查看、配置说明保存、7 个文件预览和 ZIP 下载。Go 版后端输出 Go 骨架（`internal/<module>/` 下的模型、SQL、服务、路由四个文件，已 gofmt）加前端 API、页面占位和菜单 SQL；Java 版仍输出 Controller、Service、Mapper 骨架。两者的业务 CRUD 都仍需实现，前端页面需按统一组件规范补齐；下载不会自动写入本工程。
+1. 控制台「应用管理」新建应用，进入「密钥」新增一把密钥，记下 `api_key` 与只显示一次的 `api_secret`。
+2. 「字段配置」给应用加扩展字段；需要增减的数值（积分、币）选「数值账户」类型。
+3. 业务项目前端带 `X-App-Key` 调 `/open/v1/auth/register`、`/auth/login`、`/me`；业务后端带 `X-App-Key` + `X-App-Secret` 调用户管理与账户加减接口，或用 `api_secret` 本地验签用户 token。
+4. 需要限制某个运营人员只能管这个应用：「后台账号」里给账号绑定应用并分配「应用管理员」角色。
+
+细节与字段见 [docs/platform-api.md](docs/platform-api.md)。
 
 ## 容器部署
 
-`deploy/docker-compose.yml` 一个文件编排 MySQL、Redis、Go 后端和前端（nginx 托管静态文件并把 `/api` 转发到后端）。镜像由 `.github/workflows/docker.yml` 在推送 `main` 或打 `v*` 标签时自动构建并推到 GitHub Container Registry：`ghcr.io/<github 用户名小写>/scaffold-backend` 与 `scaffold-frontend`。
-
-服务器上只需要两个文件：
+服务器上只需要 `deploy/docker-compose.yml` 和由 `deploy/.env.example` 复制出的 `.env`（填 `JWT_SECRET`、`DB_PASSWORD`）：
 
 ```bash
-mkdir scaffold && cd scaffold
-# 复制 deploy/docker-compose.yml 和 deploy/.env.example 到这里，后者改名为 .env 并填入 JWT_SECRET、DB_PASSWORD
 docker compose up -d
 ```
 
-后端首次启动会自动建库建表并导入种子数据（`DB_AUTO_INIT=true`，脚本幂等）。浏览器访问 `http://<服务器>:<WEB_PORT>`，默认 80 端口。更新版本：改 `.env` 里的 `IMAGE_TAG` 后 `docker compose pull && docker compose up -d`。镜像为私有包时先 `docker login ghcr.io`；在 GitHub 包设置里改为 public 则无需登录。
+编排包含 MySQL、Redis、后端与前端（nginx 托管页面并把 `/api`、`/open` 转发到后端）。后端首次启动自动建库建表并写入初始数据。访问 `http://<服务器>:<WEB_PORT>`，默认 80。更新版本改 `.env` 的 `IMAGE_TAG` 后 `docker compose pull && docker compose up -d`。
 
-本地构建镜像：`docker build -f scaffold-go/Dockerfile -t scaffold-backend .`（上下文为仓库根目录）和 `docker build -t scaffold-frontend scaffold-vue`；国内可给后端加 `--build-arg GOPROXY=https://goproxy.cn,direct`。
+镜像由 `.github/workflows/docker.yml` 自动构建：`ghcr.io/<github 用户名小写>/scaffold-backend` 与 `scaffold-frontend`。本地构建：`docker build -f scaffold-go/Dockerfile -t scaffold-backend .`（上下文为仓库根目录）、`docker build -t scaffold-frontend scaffold-vue`；国内可给后端加 `--build-arg GOPROXY=https://goproxy.cn,direct`。
 
 ## 验证
 
-不连接数据库和 Redis 的测试与编译：
-
 ```bash
-# 在 scaffold-system 目录
-mvn -pl scaffold-framework -am test
-mvn -pl scaffold-admin -am package -DskipTests
-```
-
-完整后端集成测试需要配置上述环境变量并准备独立校验库：
-
-```bash
-# 在 scaffold-system 目录；建议用独立校验库，测试会写入夹具和日志
-mvn -pl scaffold-admin -am test
+# 后端：集成测试需要本地 MySQL（库 scaffold_system_test 已用 sql/ 初始化）与 Redis
+cd scaffold-go && go test ./... -count=1
 ```
 
 ```bash
-# 在 scaffold-vue 目录
-npm run test:unit
-npm run build
-# 已安装 Python Playwright 与 Chromium 时，可验证真实浏览器会话与权限
-python3 scripts/session-regression.py
+# 前端
+cd scaffold-vue && npm run test:unit && npm run build
+# 已安装 Python Playwright 与 Chromium、前后端均启动时
+python scripts/session-regression.py
 ```
-
-浏览器回归脚本只创建并删除自己生成的测试角色和用户，不清空表；管理员密码可通过 `SCAFFOLD_TEST_PASSWORD` 覆盖。测试与构建成功不能代替业务页面验收。
 
 ## 许可证
 
-本项目代码采用 [MIT License](LICENSE)，允许商用、修改和分发，使用时保留版权及许可证声明。
-
-第三方依赖遵循各自的许可证。GSAP 使用 [Standard "No Charge" License](https://gsap.com/community/standard-license/)，不属于本项目的 MIT 授权范围；使用与再分发时须遵守其条款并保留原有声明。
+本项目代码采用 [MIT License](LICENSE)。第三方依赖遵循各自许可证；GSAP 使用 [Standard "No Charge" License](https://gsap.com/community/standard-license/)，不属于本项目的 MIT 授权范围。

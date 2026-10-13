@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import Icon from '@/components/Icon.vue'
-import { Button, Drawer, Field, Segmented, Select, StatusTag, Switch, Tag, TextInput, type Column } from '@/components/ui'
+import { Button, Drawer, Field, Segmented, StatusTag, Switch, Tag, TextInput, type Column } from '@/components/ui'
 import { DictSelect, FormDialog, ListPage, PermissionButton, PermissionTree } from '@/components/business'
 import PermissionMatrix, { type MatrixRole } from '@/components/business/PermissionMatrix.vue'
 import PermissionTrace from '@/components/business/PermissionTrace.vue'
@@ -21,7 +20,6 @@ interface RoleRow {
   id: number
   name: string
   code: string
-  dataScope: string
   sort: number
   status: number
   builtin: boolean
@@ -30,16 +28,6 @@ interface RoleRow {
   createTime: string
   menuIds?: number[]
 }
-
-/* 数据权限：后端写入用编码，列表返回中文名 */
-const SCOPES = [
-  { code: 'ALL', name: '全部数据权限', desc: '可查看系统内所有部门的数据' },
-  { code: 'DEPT_AND_CHILD', name: '本部门及以下数据权限', desc: '可查看本部门及全部下级部门的数据' },
-  { code: 'DEPT', name: '本部门数据权限', desc: '仅可查看本部门的数据' },
-  { code: 'SELF', name: '仅本人数据权限', desc: '仅可查看本人创建的数据' },
-  { code: 'CUSTOM', name: '自定义数据权限', desc: '按角色关联的部门范围查看数据' },
-]
-const scopeCodeOf = (label?: string) => SCOPES.find(s => s.name === label || s.code === label)?.code ?? 'SELF'
 
 const list = useListPage<RoleRow, { keyword: string; status: string }>({
   query: { keyword: '', status: '' },
@@ -50,7 +38,7 @@ const list = useListPage<RoleRow, { keyword: string; status: string }>({
 
 const columns: Column[] = [
   { key: 'name', title: '角色', minWidth: 180 },
-  { key: 'dataScope', title: '数据权限' },
+  { key: 'remark', title: '说明' },
   { key: 'userCount', title: '用户数', width: 90, align: 'right' },
   { key: 'sort', title: '排序', width: 80, align: 'right' },
   { key: 'status', title: '状态', width: 96 },
@@ -125,13 +113,12 @@ watch(view, async (next, prev) => {
 }, { immediate: true })
 
 /* ── 新增 / 编辑 ── */
-interface RoleForm { id?: number; name: string; code: string; dataScope: string; sort: number | null; status: number; remark: string }
-const emptyForm = (): RoleForm => ({ name: '', code: '', dataScope: 'SELF', sort: 10, status: 1, remark: '' })
+interface RoleForm { id?: number; name: string; code: string; sort: number | null; status: number; remark: string }
+const emptyForm = (): RoleForm => ({ name: '', code: '', sort: 10, status: 1, remark: '' })
 const dialog = ref(false)
 const saving = ref(false)
 const form = reactive<RoleForm>(emptyForm())
 const errors = ref<Partial<Record<keyof RoleForm, string>>>({})
-const scopeOptions = SCOPES.map(s => ({ label: s.name, value: s.code }))
 
 function openCreate() {
   Object.assign(form, emptyForm(), { id: undefined })
@@ -140,7 +127,7 @@ function openCreate() {
 }
 
 function openEdit(row: RoleRow) {
-  Object.assign(form, { id: row.id, name: row.name, code: row.code, dataScope: scopeCodeOf(row.dataScope), sort: row.sort, status: row.status, remark: row.remark ?? '' })
+  Object.assign(form, { id: row.id, name: row.name, code: row.code, sort: row.sort, status: row.status, remark: row.remark ?? '' })
   errors.value = {}
   dialog.value = true
 }
@@ -152,7 +139,7 @@ async function submit() {
   })
   if (Object.keys(errors.value).length) return
   saving.value = true
-  const payload = { name: form.name.trim(), code: form.code.trim(), dataScope: form.dataScope, sort: form.sort ?? 0, status: form.status, remark: form.remark }
+  const payload = { name: form.name.trim(), code: form.code.trim(), sort: form.sort ?? 0, status: form.status, remark: form.remark }
   try {
     if (form.id) {
       await systemApi.roles.update(form.id, payload)
@@ -186,14 +173,12 @@ async function remove(row: RoleRow) {
 
 /* ── 分配权限 ── */
 const permRole = ref<RoleRow | null>(null)
-const permTab = ref<'menu' | 'data'>('menu')
 const menuTree = ref<Menu[]>([])
 const checked = ref<number[]>([])
-const scope = ref('SELF')
 const permSaving = ref(false)
 const permLoading = ref(false)
 const permBody = ref<HTMLElement | null>(null)
-watch([permRole, permLoading, permTab], async () => {
+watch([permRole, permLoading], async () => {
   if (!permRole.value) return
   await nextTick()
   revealCascade(permBody.value)
@@ -212,8 +197,6 @@ const menuCount = computed(() => {
 
 async function openPermission(row: RoleRow) {
   permRole.value = row
-  permTab.value = 'menu'
-  scope.value = scopeCodeOf(row.dataScope)
   permLoading.value = true
   try {
     const [tree, assigned] = await Promise.all([systemApi.menus.tree(), systemApi.roles.menus(row.id)])
@@ -230,7 +213,7 @@ async function savePermission() {
   if (!permRole.value) return
   permSaving.value = true
   try {
-    await systemApi.roles.update(permRole.value.id, { menuIds: checked.value, dataScope: scope.value })
+    await systemApi.roles.update(permRole.value.id, { menuIds: checked.value })
     invalidatePermissionGraph()
     pushToast('权限已保存，相关用户重新登录后生效')
     permRole.value = null
@@ -246,7 +229,7 @@ async function savePermission() {
 <template>
   <ListPage
     title="角色管理"
-    desc="角色决定用户可见的菜单、可用的按钮以及可查看的数据范围。"
+    desc="角色决定后台账号可见的菜单与可用的按钮；可管理的应用在后台账号上单独绑定。"
     table-title="角色列表"
     :list="list"
     :columns="columns"
@@ -288,7 +271,7 @@ async function savePermission() {
         <div class="cell-sub mono">{{ row.code }}</div>
       </div>
     </template>
-    <template #cell-dataScope="{ row }"><span class="muted">{{ row.dataScope }}</span></template>
+    <template #cell-remark="{ row }"><span class="muted">{{ row.remark || '—' }}</span></template>
     <template #cell-userCount="{ row }"><span class="tnum">{{ row.userCount }}</span></template>
     <template #cell-sort="{ row }"><span class="tnum soft">{{ row.sort }}</span></template>
     <template #cell-status="{ row }"><StatusTag :status="row.status" /></template>
@@ -311,9 +294,6 @@ async function savePermission() {
       <Field label="角色编码" required :error="errors.code" hint="用于后端判断角色，创建后不建议修改">
         <TextInput v-model="form.code" placeholder="如：sys_admin" :invalid="!!errors.code" />
       </Field>
-      <Field label="数据权限">
-        <Select v-model="form.dataScope" :options="scopeOptions" />
-      </Field>
       <Field label="显示排序">
         <TextInput v-model="form.sort" type="number" />
       </Field>
@@ -328,34 +308,13 @@ async function savePermission() {
     <Drawer :open="Boolean(permRole)" :title="`分配权限 · ${permRole?.name ?? ''}`" :sub="permRole?.code" :width="560" @close="permRole = null">
       <div ref="permBody" class="drawer-stack">
       <div class="drawer-toolbar">
-        <Segmented v-model="permTab" label="权限类型" :options="[{ label: '菜单与按钮', value: 'menu' }, { label: '数据范围', value: 'data' }]" />
-        <span v-if="permTab === 'menu'" class="soft" style="font-size: 12px">已选 {{ menuCount.pages }} 个页面 · {{ menuCount.buttons }} 个按钮</span>
+        <span class="soft" style="font-size: 12px">菜单与按钮 · 已选 {{ menuCount.pages }} 个页面 · {{ menuCount.buttons }} 个按钮</span>
       </div>
 
-      <template v-if="permTab === 'menu'">
-        <div v-if="permLoading" style="padding: 8px 4px">
-          <span v-for="i in 8" :key="i" class="skeleton" :style="{ width: `${40 + (i * 13) % 45}%`, margin: '14px 0' }" />
-        </div>
-        <PermissionTree v-else v-model="checked" :menus="menuTree" />
-      </template>
-
-      <div v-else class="scope-list" role="radiogroup" aria-label="数据范围">
-        <button
-          v-for="s in SCOPES"
-          :key="s.code"
-          type="button"
-          role="radio"
-          :aria-checked="scope === s.code"
-          :class="['scope-option', scope === s.code && 'is-on m-pill']"
-          @click="scope = s.code"
-        >
-          <span class="scope-radio" aria-hidden="true"><Icon v-if="scope === s.code" name="check" :size="12" :stroke="2.6" /></span>
-          <span>
-            <span class="scope-name">{{ s.name }}</span>
-            <span class="scope-desc">{{ s.desc }}</span>
-          </span>
-        </button>
+      <div v-if="permLoading" style="padding: 8px 4px">
+        <span v-for="i in 8" :key="i" class="skeleton" :style="{ width: `${40 + (i * 13) % 45}%`, margin: '14px 0' }" />
       </div>
+      <PermissionTree v-else v-model="checked" :menus="menuTree" />
       </div>
 
       <template #footer>

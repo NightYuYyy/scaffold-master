@@ -126,7 +126,7 @@ export interface ListPageState {
   canExport: boolean
 }
 
-/* ── 树形列表（菜单、部门）：不分页，其余能力与 useListPage 一致 ── */
+/* ── 树形列表（菜单）：不分页，其余能力与 useListPage 一致 ── */
 export interface TreeListOptions<Row, Query extends Record<string, unknown>> {
   query: Query
   fetch: (params: QueryParams) => Promise<Row[]>

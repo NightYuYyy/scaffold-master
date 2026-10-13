@@ -23,15 +23,12 @@ type authUserRow struct {
 	Password string
 	Nickname *string
 	Status   *int
-	DeptID   *int64
-	DeptName *string
 }
 
 func selectUserByUsername(ctx context.Context, q framework.Querier, username string) (*authUserRow, error) {
 	row, err := framework.SelectRow(ctx, q, `
-		SELECT u.id, u.username, u.password, u.nickname, u.status, u.dept_id, d.dept_name
+		SELECT u.id, u.username, u.password, u.nickname, u.status
 		FROM sys_user u
-		LEFT JOIN sys_dept d ON d.id = u.dept_id
 		WHERE u.username = ? AND u.deleted = 0
 		LIMIT 1`, username)
 	if err != nil || row == nil {
@@ -41,7 +38,6 @@ func selectUserByUsername(ctx context.Context, q framework.Querier, username str
 		ID:       framework.AsInt64(row["id"]),
 		Username: framework.StrOrEmpty(row["username"]),
 		Password: framework.StrOrEmpty(row["password"]),
-		DeptID:   framework.AsInt64Ptr(row["dept_id"]),
 	}
 	if v := row["nickname"]; v != nil {
 		s := framework.StrOrEmpty(v)
@@ -50,10 +46,6 @@ func selectUserByUsername(ctx context.Context, q framework.Querier, username str
 	if v := row["status"]; v != nil {
 		n := int(framework.AsInt64(v))
 		u.Status = &n
-	}
-	if v := row["dept_name"]; v != nil {
-		s := framework.StrOrEmpty(v)
-		u.DeptName = &s
 	}
 	return u, nil
 }
@@ -197,6 +189,44 @@ func (p *PermissionResolver) HasPermission(ctx context.Context, username, permis
 	return err == nil && slices.Contains(perms, permission)
 }
 
+// AppScope 对应 docs「应用范围」：super_admin 可见全部应用（all = true，appIDs 为 nil）；
+// 其他账号只看得到 sys_user_app 绑定的应用（未绑定则为空切片）。
+func (p *PermissionResolver) AppScope(ctx context.Context, username string) (all bool, appIDs []int64, err error) {
+	scope, err := selectAppScope(ctx, p.db, username)
+	return scope.all, scope.ids, err
+}
+
+// appScope 当前后台账号可见的应用范围；management / dashboard 共用。
+type appScope struct {
+	all bool
+	ids []int64
+}
+
+// clause 生成追加在 WHERE 后的 " AND <col> IN (?, ?)"；super_admin 返回空串。
+// 未绑定任何应用时 framework.In(0) 为 "NULL"，IN (NULL) 自然匹配不到任何行。
+func (s appScope) clause(col string) (string, []any) {
+	if s.all {
+		return "", nil
+	}
+	return " AND " + col + " IN (" + framework.In(len(s.ids)) + ")", framework.Int64Args(s.ids)
+}
+
+func selectAppScope(ctx context.Context, q framework.Querier, username string) (appScope, error) {
+	user, err := selectUserByUsername(ctx, q, username)
+	if err != nil || !user.enabled() {
+		return appScope{ids: []int64{}}, err
+	}
+	roles, err := selectRoleCodes(ctx, q, user.ID)
+	if err != nil {
+		return appScope{}, err
+	}
+	if slices.Contains(roles, superAdmin) {
+		return appScope{all: true}, nil
+	}
+	ids, err := framework.SelectInt64s(ctx, q, `SELECT app_id FROM sys_user_app WHERE user_id = ? ORDER BY app_id`, user.ID)
+	return appScope{ids: ids}, err
+}
+
 // ---------- AuthService ----------
 
 type loginRequest struct {
@@ -220,8 +250,6 @@ type currentUserResponse struct {
 	UserID      int64    `json:"userId"`
 	Username    string   `json:"username"`
 	Nickname    *string  `json:"nickname"`
-	DeptID      *int64   `json:"deptId"`
-	DeptName    *string  `json:"deptName"`
 	Roles       []string `json:"roles"`
 	Permissions []string `json:"permissions"`
 }
@@ -304,7 +332,7 @@ func (s *AuthService) CurrentUser(ctx context.Context) (*currentUserResponse, er
 	}
 	return &currentUserResponse{
 		UserID: user.ID, Username: user.Username, Nickname: user.Nickname,
-		DeptID: user.DeptID, DeptName: user.DeptName, Roles: roles, Permissions: perms,
+		Roles: roles, Permissions: perms,
 	}, nil
 }
 

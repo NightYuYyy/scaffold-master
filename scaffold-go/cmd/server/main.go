@@ -3,7 +3,7 @@
 //	scaffold-server            启动服务；DB_AUTO_INIT=true 时先执行数据库初始化
 //	scaffold-server init-db    仅执行数据库初始化（对应 Java 的 DbInit）
 //
-// SQL 目录由 SQL_DIR 指定，默认 ../scaffold-system/sql（本地开发）；镜像内为 /app/sql。
+// SQL 目录由 SQL_DIR 指定，默认 ../sql（本地开发，仓库根目录）；镜像内为 /app/sql。
 package main
 
 import (
@@ -20,7 +20,7 @@ func main() {
 	cfg := app.ConfigFromEnv()
 	sqlDir := os.Getenv("SQL_DIR")
 	if sqlDir == "" {
-		sqlDir = "../scaffold-system/sql"
+		sqlDir = "../sql"
 	}
 	initOnly := len(os.Args) > 1 && os.Args[1] == "init-db"
 	if initOnly || strings.EqualFold(os.Getenv("DB_AUTO_INIT"), "true") {

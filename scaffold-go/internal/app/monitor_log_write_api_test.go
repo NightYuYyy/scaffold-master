@@ -15,8 +15,8 @@ func monitorInsertOperLog(t testing.TB, module string) int64 {
 	t.Helper()
 	exec(t, `
                 INSERT INTO sys_oper_log (module, action, request_method, request_url, request_params,
-                    oper_name, dept_name, ip, location, cost, result)
-                VALUES (?, 'DELETE', 'DELETE', '/api/test', '{}', 'admin', '研发中心', '127.0.0.1', '本机', 12, 1)
+                    oper_name, ip, location, cost, result)
+                VALUES (?, 'DELETE', 'DELETE', '/api/test', '{}', 'admin', '127.0.0.1', '本机', 12, 1)
                 `, module)
 	return queryInt64(t, "SELECT id FROM sys_oper_log WHERE module = ?", module)
 }
@@ -25,8 +25,8 @@ func monitorInsertOperLogWithParams(t testing.TB, module, params string) int64 {
 	t.Helper()
 	exec(t, `
                 INSERT INTO sys_oper_log (module, action, request_method, request_url, request_params,
-                    oper_name, dept_name, ip, location, cost, result)
-                VALUES (?, 'POST', 'POST', '/api/test/params', ?, 'admin', '研发中心', '127.0.0.1', '本机', 12, 1)
+                    oper_name, ip, location, cost, result)
+                VALUES (?, 'POST', 'POST', '/api/test/params', ?, 'admin', '127.0.0.1', '本机', 12, 1)
                 `, module, params)
 	return queryInt64(t, "SELECT id FROM sys_oper_log WHERE request_params = ?", params)
 }
@@ -105,7 +105,7 @@ func TestMonitorLogsCanBeExportedAsCsv(t *testing.T) {
 	if cd := operExport.Header.Get("Content-Disposition"); !strings.Contains(cd, "oper-logs") {
 		t.Errorf("oper export Content-Disposition = %q", cd)
 	}
-	if !strings.Contains(operExport.Raw, "模块,类型,请求方式,请求地址,请求参数,操作人,部门,IP,地点,耗时,结果,操作时间,异常信息") {
+	if !strings.Contains(operExport.Raw, "模块,类型,请求方式,请求地址,请求参数,操作人,IP,地点,耗时,结果,操作时间,异常信息") {
 		t.Errorf("oper export lacks header: %s", operExport.Raw)
 	}
 	if !strings.Contains(operExport.Raw, module) {

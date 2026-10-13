@@ -12,7 +12,7 @@ import { ask, presetQuestions, type AnswerCard, type AnswerChip } from '@/compos
 import { hasPermission } from '@/directives/permission'
 
 /* ============================================================
-   命令面板：最近访问 / 页面 / 用户 / 快捷动作 四组结果，
+   命令面板：最近访问 / 页面 / 后台账号 / 快捷动作 四组结果，
    一块玻璃滑块在结果间移动表示键盘焦点。
    ============================================================ */
 const props = defineProps<{ open: boolean }>()
@@ -65,12 +65,16 @@ const entries = computed<Entry[]>(() => {
   const usersPath = pathOf('system/user/index')
   if (key && usersPath) {
     users.value.forEach(u => out.push({
-      key: `u-${u.id}`, group: '用户', label: u.nickname, sub: `@${u.username} · ${u.deptName || '未分配部门'}`, avatar: u.nickname,
+      key: `u-${u.id}`, group: '后台账号', label: u.nickname, sub: `@${u.username} · ${u.roleName || '未分配角色'}`, avatar: u.nickname,
       run: () => go(usersPath, { keyword: u.username }),
     }))
   }
   const dark = document.documentElement.dataset.theme === 'dark'
+  const appsPath = pathOf('platform/app/index')
+  const appUsersPath = pathOf('platform/user/index')
   const actions: Entry[] = [
+    ...(appsPath && hasPermission('platform:app:add') ? [{ key: 'a-app', group: '动作', label: '新增应用', sub: '应用管理', icon: 'grid', run: () => go(appsPath, { create: '1' }) }] : []),
+    ...(appUsersPath && hasPermission('platform:user:add') ? [{ key: 'a-appuser', group: '动作', label: '新增应用用户', sub: '应用用户', icon: 'users', run: () => go(appUsersPath, { create: '1' }) }] : []),
     { key: 'a-theme', group: '动作', label: dark ? '切换到浅色外观' : '切换到深色外观', icon: dark ? 'sun' : 'moon', run: () => { appearance.theme = dark ? 'light' : 'dark'; emit('close') } },
     { key: 'a-appearance', group: '动作', label: '外观设置', sub: '主题、表格密度', icon: 'sliders', run: () => act('appearance') },
     { key: 'a-password', group: '动作', label: '修改密码', icon: 'key', run: () => act('password') },
@@ -205,7 +209,7 @@ function onKey(event: KeyboardEvent) {
             <input
               ref="input"
               v-model="keyword"
-              placeholder="搜索页面、用户或动作"
+              placeholder="搜索页面、账号或动作"
               role="combobox"
               aria-expanded="true"
               aria-controls="cmd-results"
@@ -218,7 +222,7 @@ function onKey(event: KeyboardEvent) {
               <div v-if="!askCards" class="ask-presets">
                 <button v-for="p in askPresets" :key="p" type="button" @click="typeAsk(p)">{{ p }}</button>
               </div>
-              <p v-if="!askCards" class="cmd-ask-hint faint">输入问题后回车，例如「谁能删除用户」</p>
+              <p v-if="!askCards" class="cmd-ask-hint faint">输入问题后回车，例如「谁能新增应用」</p>
               <div v-else ref="askResults" class="cmd-ask-results" aria-live="polite">
                 <div class="ask-results-head">
                   <span><Icon name="activity" :size="13" />{{ askedText }}</span>

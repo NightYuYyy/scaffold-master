@@ -1,4 +1,4 @@
-// Package system 对应 Java 的 scaffold-system 模块：认证、用户/角色/菜单/部门/岗位/字典/参数、日志、工作台。
+// Package system 对应 Java 的 scaffold-system 模块：认证、后台账号/角色/菜单/字典/参数、日志、工作台。
 package system
 
 import (
@@ -9,10 +9,9 @@ import (
 
 // Deps 由 main 组装后传给各 Register*Routes。
 type Deps struct {
-	DB        *sql.DB
-	Security  *framework.Security
-	Recorder  framework.OperationLogRecorder
-	DataScope framework.DataScopeResolver
+	DB       *sql.DB
+	Security *framework.Security
+	Recorder framework.OperationLogRecorder
 	// Perm 为 SystemPermissionResolver，SystemManagementService.userOptions 直接用它判断按钮权限。
 	Perm *PermissionResolver
 }

@@ -1,17 +1,25 @@
 import type { HttpClient, QueryParams } from './http'
 import type { PageResult } from './system'
 
+/** 工作台概览读数：key 指标键、label 中文名、value 数值、sub 补充说明；delta 环比百分比、up 方向、fresh 上一周期为 0 */
+export interface DashboardStat {
+  key: string
+  label: string
+  value: number
+  sub?: string
+  delta?: number
+  up?: boolean
+  fresh?: boolean
+}
+
+/** 工作台概览（/dashboard/summary）：trend 注册 / 登录趋势，apps 各应用读数，activities 最近认证动态，counters 数值账户汇总 */
 export interface DashboardSummary {
-  stats: Array<Record<string, unknown>>
-  trend: number[]
-  activities: Array<Record<string, unknown>>
-  roleDist: Array<{ label: string; value: number }>
-  trendTotal: number
-  successRate: number
-  /** 上一等长周期的登录次数，用于环比 */
-  trendPrev: number
-  /** 近 7 天按日操作量：date 日期、total 操作数、failed 失败数 */
-  dailyOps: Array<{ date: string; total: number; failed: number }>
+  stats: DashboardStat[]
+  range: '24h' | '7d' | '30d'
+  trend: { labels: string[]; registrations: number[]; logins: number[] }
+  apps: Array<{ id: number; code: string; name: string; users: number; registrations: number; logins: number }>
+  activities: Array<{ app: string; who: string; action: string; time: string; tint: 'ok' | 'danger' | string }>
+  counters: Array<{ app: string; fieldKey: string; label: string; total: number; changes: number }>
 }
 
 export interface GeneratorFile {

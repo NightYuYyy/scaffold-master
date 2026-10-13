@@ -214,8 +214,10 @@
   box-shadow: var(--edge), var(--e1);
 }
 .bento > :not(.glow-layer) { position: relative; z-index: 1; }
-.bento-hero { grid-column: span 8; grid-row: span 2; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
-.bento-side { grid-column: span 4; display: flex; flex-direction: column; justify-content: space-between; gap: 14px; min-height: 176px; }
+.bento-hero { grid-column: span 8; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+/* 侧块堆叠：读数条数随 stats 变化，与主卡同高 */
+.bento-stack { grid-column: span 4; display: grid; grid-auto-rows: 1fr; gap: 16px; min-width: 0; }
+.bento-side { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-height: 120px; }
 .bento-third { grid-column: span 4; }
 .bento-wide { grid-column: span 8; }
 .bento-narrow { grid-column: span 4; }
@@ -273,16 +275,14 @@
 .side-label { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
 .page-date { display: block; margin-bottom: 8px; font-size: 12px; letter-spacing: .02em; color: var(--ink-faint); }
 
-/* 数据权限分布：横向占比条 */
-.share-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
-.share-list li { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 12px; font-size: 12.5px; }
-.share-label { color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.share-track { position: relative; height: 8px; border-radius: 999px; background: var(--hover-bg); overflow: hidden; }
-.share-track i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: color-mix(in srgb, var(--cat-ink) 70%, transparent); transform-origin: left; animation: share-grow .9s var(--ease-premium) both; }
-.share-value { font-weight: 650; min-width: 76px; text-align: right; }
-.share-value small { font-weight: 500; color: var(--ink-faint); }
-@keyframes share-grow { from { transform: scaleX(0); } }
-@media (prefers-reduced-motion: reduce) { .share-track i { animation: none; } }
+/* 数值账户汇总：每行一个账户，右侧读数 */
+.counter-list { list-style: none; margin: -4px 0 0; padding: 0; display: flex; flex-direction: column; }
+.counter-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.counter-list li + li { border-top: 1px solid var(--line); }
+.counter-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.counter-label { font-size: 13px; font-weight: 640; }
+.counter-label small { margin-left: 6px; font-weight: 400; color: var(--ink-faint); }
+.counter-sub { font-size: 11.5px; color: var(--ink-soft); }
 .side-ico { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--r-xs); color: var(--ink-soft); }
 .side-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 
@@ -327,8 +327,8 @@
 .page:not(.is-entrance-ready) .bento { opacity: 0; }
 
 @media (max-width: 1280px) {
-  .bento-hero { grid-column: 1 / -1; grid-row: auto; }
-  .bento-side { grid-column: span 6; }
+  .bento-hero { grid-column: 1 / -1; }
+  .bento-stack { grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); grid-auto-rows: auto; }
   .bento-third { grid-column: span 6; }
   .bento-ring { grid-column: span 6; }
   .bento-wide, .bento-narrow, .bento-half { grid-column: 1 / -1; }
@@ -336,44 +336,23 @@
 @media (max-width: 760px) {
   .bento-grid { gap: 12px; }
   .bento { padding: 16px; border-radius: var(--r-lg); }
-  .bento-side, .bento-third, .bento-ring { grid-column: 1 / -1; }
+  .bento-third, .bento-ring { grid-column: 1 / -1; }
   .hero-body { grid-template-columns: minmax(0, 1fr); }
   .hero-figure { padding-bottom: 0; }
   .metric-xl .metric-figure { font-size: 44px; }
 }
 
-/* ── 抽屉内工具条 / 数据范围 ─────────────────────────────────── */
+/* ── 抽屉内工具条 ── */
 .drawer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 
-.scope-list { display: flex; flex-direction: column; gap: 8px; }
-.scope-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: 100%;
-  padding: 13px 14px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--line-strong);
-  text-align: left;
-  transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
-}
-.scope-option:hover:not(.is-on) { border-color: rgba(var(--shade), .2); background: var(--hover-bg); }
-.scope-option.is-on { border-color: var(--glass-line); }
-.scope-radio {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  margin-top: 1px;
-  border-radius: 999px;
-  border: 1.5px solid rgba(var(--shade), .28);
-  color: #fff;
-  flex: none;
-}
-.scope-option.is-on .scope-radio { background: var(--blue); border-color: var(--blue); }
-.scope-name { display: block; font-size: 13.5px; font-weight: 640; }
-.scope-desc { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
+/* ── 应用平台页：勾选组、复制行、密钥提示、流水正负读数 ───────── */
+.check-grid { display: flex; flex-wrap: wrap; gap: 8px 18px; min-height: var(--control-h); align-items: center; }
+.copy-row { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.copy-row .mono, .copy-row .code-chip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.secret-warn { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 14px; padding: 10px 12px; border-radius: var(--r-sm); font-size: 12.5px; line-height: 1.5; color: var(--red-text); background: var(--red-soft); }
+.secret-warn svg { flex: none; margin-top: 2px; }
+.is-ok-text { color: var(--leaf-text); font-weight: 640; }
+.is-danger-text { color: var(--red-text); font-weight: 640; }
 
 /* ── 外观设置 ───────────────────────────────────────────────── */
 .pref-list { display: flex; flex-direction: column; }

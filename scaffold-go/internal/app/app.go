@@ -14,6 +14,7 @@ import (
 
 	"scaffold/internal/framework"
 	"scaffold/internal/generator"
+	"scaffold/internal/platform"
 	"scaffold/internal/system"
 )
 
@@ -87,11 +88,10 @@ func New(cfg Config) (*App, error) {
 		PermitAll:  map[string]bool{"/api/health": true, "/api/auth/captcha": true, "/api/auth/login": true},
 	}
 	deps := system.Deps{
-		DB:        db,
-		Security:  sec,
-		Recorder:  system.NewOperationLogRecorder(db),
-		DataScope: system.NewDataScopeResolver(db),
-		Perm:      perm,
+		DB:       db,
+		Security: sec,
+		Recorder: system.NewOperationLogRecorder(db),
+		Perm:     perm,
 	}
 
 	mux := http.NewServeMux()
@@ -104,10 +104,16 @@ func New(cfg Config) (*App, error) {
 	system.RegisterDashboardRoutes(mux, system.NewDashboardService(db))
 	system.RegisterMonitorStatsRoutes(mux, deps, system.NewMonitorStatsService(db))
 	generator.RegisterRoutes(mux, db, sec, deps.Recorder)
+	pdeps := platform.Deps{DB: db, Redis: rdb, Security: sec, Recorder: deps.Recorder, Perm: perm}
+	platform.RegisterAdminRoutes(mux, pdeps)
 
-	// 过滤器顺序与 Java 一致：TraceId → 异常兜底 → JWT 认证 → 路由（404/405 统一 JSON）
-	handler := framework.Trace(framework.Recover(sec.Authenticate(framework.NotFoundOr405(mux))))
-	return &App{Handler: handler, DB: db, Redis: rdb}, nil
+	// 后台接口：TraceId → 异常兜底 → JWT 认证 → 路由（404/405 统一 JSON）
+	admin := framework.Trace(framework.Recover(sec.Authenticate(framework.NotFoundOr405(mux))))
+	// 开放接口 /open/v1：应用密钥与用户令牌认证，由 platform 包自行处理
+	root := http.NewServeMux()
+	root.Handle("/open/", platform.OpenHandler(pdeps))
+	root.Handle("/", admin)
+	return &App{Handler: root, DB: db, Redis: rdb}, nil
 }
 
 // Close 释放连接。

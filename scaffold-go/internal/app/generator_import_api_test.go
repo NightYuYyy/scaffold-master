@@ -1,6 +1,6 @@
 package app
 
-// 对应 GeneratorImportApiTest。
+// 对应 GeneratorImportApiTest。导入目标用 sys_login_log（新表结构中仍存在、种子未导入）。
 
 import (
 	"archive/zip"
@@ -12,10 +12,15 @@ import (
 	"scaffold/internal/framework"
 )
 
-// cleanImportedSysFile 对应 @BeforeEach cleanImportedTable。
-func cleanImportedSysFile(t testing.TB) {
+const (
+	importTable        = "sys_login_log"
+	importTableComment = "后台登录日志"
+)
+
+// cleanImportedTable 对应 @BeforeEach cleanImportedTable。
+func cleanImportedTable(t testing.TB) {
 	t.Helper()
-	ids, err := framework.SelectInt64s(t.Context(), testDB, "SELECT id FROM gen_table WHERE table_name = 'sys_file'")
+	ids, err := framework.SelectInt64s(t.Context(), testDB, "SELECT id FROM gen_table WHERE table_name = ?", importTable)
 	if err != nil {
 		t.Fatalf("query gen_table: %v", err)
 	}
@@ -46,10 +51,10 @@ func unzipFiles(t testing.TB, body string) map[string]string {
 }
 
 func TestGeneratorCanListAndImportDatabaseTables(t *testing.T) {
-	cleanImportedSysFile(t)
+	cleanImportedTable(t)
 	token := loginAsAdmin(t)
 
-	candidates := get(t, "/api/tool/generator/importable-tables?keyword=sys_file", token)
+	candidates := get(t, "/api/tool/generator/importable-tables?keyword="+importTable, token)
 	if candidates.Status != 200 {
 		t.Fatalf("importable-tables status %d: %s", candidates.Status, candidates.Raw)
 	}
@@ -58,17 +63,17 @@ func TestGeneratorCanListAndImportDatabaseTables(t *testing.T) {
 		t.Fatalf("no importable candidates: %s", candidates.Raw)
 	}
 	candidate := cands[0]
-	if candidate["tableName"] != "sys_file" {
+	if candidate["tableName"] != importTable {
 		t.Errorf("tableName = %v", candidate["tableName"])
 	}
-	if candidate["tableComment"] != "文件信息表" {
+	if candidate["tableComment"] != importTableComment {
 		t.Errorf("tableComment = %v", candidate["tableComment"])
 	}
 	if candidate["imported"] != false {
 		t.Errorf("imported = %v, want false", candidate["imported"])
 	}
 
-	imported := post(t, "/api/tool/generator/import", token, map[string]any{"tableNames": []string{"sys_file"}})
+	imported := post(t, "/api/tool/generator/import", token, map[string]any{"tableNames": []string{importTable}})
 	if imported.Status != 200 {
 		t.Fatalf("import status %d: %s", imported.Status, imported.Raw)
 	}
@@ -76,23 +81,23 @@ func TestGeneratorCanListAndImportDatabaseTables(t *testing.T) {
 		t.Errorf("imported = %d, want 1", n)
 	}
 
-	tableID := queryInt64(t, "SELECT id FROM gen_table WHERE table_name = 'sys_file'")
+	tableID := queryInt64(t, "SELECT id FROM gen_table WHERE table_name = ?", importTable)
 	if tableID == 0 {
 		t.Fatalf("gen_table id is null")
 	}
-	if n := queryInt64(t, "SELECT COUNT(*) FROM gen_table_column WHERE table_id = ? AND column_name = 'original_name'", tableID); n != 1 {
-		t.Errorf("original_name column count = %d, want 1", n)
+	if n := queryInt64(t, "SELECT COUNT(*) FROM gen_table_column WHERE table_id = ? AND column_name = 'login_time'", tableID); n != 1 {
+		t.Errorf("login_time column count = %d, want 1", n)
 	}
 }
 
 func TestGeneratorCanDownloadCodeZip(t *testing.T) {
-	cleanImportedSysFile(t)
+	cleanImportedTable(t)
 	token := loginAsAdmin(t)
-	imported := post(t, "/api/tool/generator/import", token, map[string]any{"tableNames": []string{"sys_file"}})
+	imported := post(t, "/api/tool/generator/import", token, map[string]any{"tableNames": []string{importTable}})
 	if imported.Status != 200 {
 		t.Fatalf("import status %d: %s", imported.Status, imported.Raw)
 	}
-	tableID := queryInt64(t, "SELECT id FROM gen_table WHERE table_name = 'sys_file'")
+	tableID := queryInt64(t, "SELECT id FROM gen_table WHERE table_name = ?", importTable)
 
 	download := get(t, "/api/tool/generator/tables/"+itoa(tableID)+"/download", token)
 
@@ -102,42 +107,42 @@ func TestGeneratorCanDownloadCodeZip(t *testing.T) {
 	if ct := download.Header.Get("Content-Type"); ct != "application/zip" {
 		t.Errorf("Content-Type = %q", ct)
 	}
-	if cd := download.Header.Get("Content-Disposition"); !strings.Contains(cd, "SysFile.zip") {
+	if cd := download.Header.Get("Content-Disposition"); !strings.Contains(cd, "SysLoginLog.zip") {
 		t.Errorf("Content-Disposition = %q", cd)
 	}
 
 	files := unzipFiles(t, download.Raw)
 	for _, name := range []string{
-		"backend/internal/system/sys_file_model.go",
-		"backend/internal/system/sys_file_sql.go",
-		"backend/internal/system/sys_file_service.go",
-		"backend/internal/system/sys_file_handler.go",
-		"frontend/src/api/system/sysFile.ts",
-		"frontend/src/views/system/sysFile/index.vue",
-		"sql/sys_file_menu.sql",
+		"backend/internal/system/sys_login_log_model.go",
+		"backend/internal/system/sys_login_log_sql.go",
+		"backend/internal/system/sys_login_log_service.go",
+		"backend/internal/system/sys_login_log_handler.go",
+		"frontend/src/api/system/sysLoginLog.ts",
+		"frontend/src/views/system/sysLoginLog/index.vue",
+		"sql/sys_login_log_menu.sql",
 	} {
 		if _, ok := files[name]; !ok {
 			t.Errorf("zip lacks %s (has %v)", name, keysOf(files))
 		}
 	}
-	handler := files["backend/internal/system/sys_file_handler.go"]
-	for _, s := range []string{"func RegisterSysFileRoutes(", `"GET /api/system/sysFile"`, `sec.Perm("system:sysFile:list")`} {
+	handler := files["backend/internal/system/sys_login_log_handler.go"]
+	for _, s := range []string{"func RegisterSysLoginLogRoutes(", `"GET /api/system/sysLoginLog"`, `sec.Perm("system:sysLoginLog:list")`} {
 		if !strings.Contains(handler, s) {
 			t.Errorf("handler lacks %q", s)
 		}
 	}
-	if model := files["backend/internal/system/sys_file_model.go"]; !strings.Contains(model, "type SysFile struct") {
+	if model := files["backend/internal/system/sys_login_log_model.go"]; !strings.Contains(model, "type SysLoginLog struct") {
 		t.Errorf("model lacks struct: %s", model)
 	}
-	vue := files["frontend/src/views/system/sysFile/index.vue"]
-	for _, s := range []string{"SysFile", "sys_file"} {
+	vue := files["frontend/src/views/system/sysLoginLog/index.vue"]
+	for _, s := range []string{"SysLoginLog", importTable} {
 		if !strings.Contains(vue, s) {
 			t.Errorf("index.vue lacks %q", s)
 		}
 	}
-	menuSQL := files["sql/sys_file_menu.sql"]
-	if !strings.Contains(menuSQL, "sys_file") {
-		t.Errorf("menu sql lacks sys_file: %s", menuSQL)
+	menuSQL := files["sql/sys_login_log_menu.sql"]
+	if !strings.Contains(menuSQL, importTable) {
+		t.Errorf("menu sql lacks %s: %s", importTable, menuSQL)
 	}
 	menuCount := queryInt64(t, "SELECT COUNT(*) FROM sys_menu")
 	// 对应 TransactionTemplate + setRollbackOnly：在事务内执行生成的 SQL 并回滚。
@@ -163,8 +168,8 @@ func TestGeneratorCanDownloadCodeZip(t *testing.T) {
 	if row["menu_type"] != "menu" {
 		t.Errorf("menu_type = %v, want menu", row["menu_type"])
 	}
-	if row["permission"] != "system:sysFile:list" {
-		t.Errorf("permission = %v, want system:sysFile:list", row["permission"])
+	if row["permission"] != "system:sysLoginLog:list" {
+		t.Errorf("permission = %v, want system:sysLoginLog:list", row["permission"])
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("rollback: %v", err)

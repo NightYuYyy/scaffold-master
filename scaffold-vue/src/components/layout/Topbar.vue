@@ -95,7 +95,7 @@ onBeforeUnmount(() => closeMenu())
       <Avatar :name="currentUser?.nickname" :size="32" />
       <span class="user-meta">
         <span class="user-name" style="display: block">{{ currentUser?.nickname }}</span>
-        <span class="user-role" style="display: block">{{ currentUser?.deptName || currentUser?.username }}</span>
+        <span class="user-role" style="display: block">@{{ currentUser?.username }}</span>
       </span>
       <Icon name="chevronDown" :size="14" style="color: var(--ink-soft)" />
     </button>
@@ -105,7 +105,7 @@ onBeforeUnmount(() => closeMenu())
         <div v-if="menuOpen" ref="pop" class="menu-pop m-float" role="menu" :style="{ top: `${pos.top}px`, right: `${pos.right}px` }">
           <div class="menu-head">
             <div style="font-weight: 680">{{ currentUser?.nickname }}</div>
-            <div class="soft" style="font-size: 12px">@{{ currentUser?.username }}<template v-if="currentUser?.deptName"> · {{ currentUser.deptName }}</template></div>
+            <div class="soft" style="font-size: 12px">@{{ currentUser?.username }}</div>
           </div>
           <button type="button" class="menu-item" role="menuitem" @click="pick('password')"><Icon name="key" :size="16" />修改密码</button>
           <button type="button" class="menu-item" role="menuitem" @click="pick('appearance')"><Icon name="contrast" :size="16" />外观设置</button>
