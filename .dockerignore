@@ -1,0 +1,14 @@
+# 后端镜像的构建上下文是仓库根目录：只需要 scaffold-go 与 scaffold-system/sql
+.git
+.github
+docs
+deploy
+scaffold-vue
+scaffold-system/scaffold-*
+scaffold-system/pom.xml
+**/node_modules
+**/target
+**/out
+**/.omc
+**/*.exe
+**/*.md

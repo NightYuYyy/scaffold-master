@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-13（代码生成改为 Go 骨架；容器编排与 GitHub 自动打包）
+
+- 代码生成器改为输出 Go 骨架：`backend/internal/<module>/<table>_model.go` / `_sql.go` / `_service.go` / `_handler.go`（按本工程 `framework` 的查询辅助与路由注册方式，已 gofmt），前端 API、页面占位与菜单 SQL 不变；预览默认选中路由文件，下载文件名为 `<ClassName>.zip`。导入记录的字段类型沿用原 `java_type` 列，渲染时映射为 Go 类型。
+- 新增 `scaffold-server init-db`（对应 Java `DbInit`）与 `DB_AUTO_INIT=true` 启动前自动初始化；MySQL 未就绪时最多等待 90 秒。
+- 新增容器化：`scaffold-go/Dockerfile`（多阶段，alpine 运行、非 root、带健康检查，内置初始化 SQL）、`scaffold-vue/Dockerfile`（构建后 nginx 托管，`/api` 反代到后端，后端地址可用 `BACKEND_UPSTREAM` 覆盖）、`deploy/docker-compose.yml` + `deploy/.env.example`（MySQL、Redis、后端、前端一键编排，服务器只需这两个文件）、`.github/workflows/docker.yml`（推 `main` 或 `v*` 标签时构建两个镜像推到 ghcr.io，标签 latest / 分支 / sha / 版本号）。
+- 验证：生成器单元测试改为校验 Go 骨架可被 `go/format` 解析且已格式化；集成测试全部通过；本地构建两个镜像并用 compose 起完整栈，经前端 nginx 登录、读写接口正常。
+
+## 2026-10-13（后端 Go 版 scaffold-go）
+
+- 新增 `scaffold-go`：`scaffold-system` 的 Go 等价实现，83 个接口的路径、JSON 字段与类型、错误码与中文提示、CSV / ZIP 响应、权限码、数据范围与操作日志语义均与 Java 版一致，`scaffold-vue` 不做任何改动即可切换。模块一一对应：`internal/framework`（统一响应、异常映射、TraceId、JWT + Redis 会话、验证码、权限 / 数据范围 / 操作日志中间件、`database/sql` 查询辅助）、`internal/system`、`internal/generator`、`internal/app` + `cmd/server`。
+- 仅四个依赖（MySQL 驱动、go-redis、golang-jwt、bcrypt），路由用 Go 1.22+ 标准库 `ServeMux`，无 ORM 与 Web 框架；SQL 从 MyBatis 注解逐条原样移植；环境变量、初始化 SQL、密码哈希、Redis 键名与 Java 版通用，可连同一套库。
+- 关键对应细节：`BusinessException(code, msg)` 保持 HTTP 400 + `body.code`；DSN 带 `clientFoundRows=true` 使 UPDATE 影响行数与 JDBC 一致；操作日志中间件在权限校验外层，参数绑定 / 校验失败不记日志；查询结果按 MyBatis `Map` + Jackson 的类型规则输出。代码生成器仍输出 Java / MyBatis 骨架，改为 Go 骨架另行决定。
+- 已知差异（前端不触发）：无权限且参数非法时 Java 返回 400、Go 返回 403；JSON 键顺序不同；Jackson 对字符串数字的宽松转换 Go 不支持；浮点文本 `100.0` 与 `100`。详见 `scaffold-go/README.md`。
+- 独立代码审查对照 Java 源码后修正：操作日志 `request_params` 改为序列化绑定后的 DTO（字段顺序、含 null 字段、脱敏、UTF-16 截断与 Java 一致）；`@RequestBody` 复刻 Jackson 宽松标量转换与大小写敏感字段名；JWT 按密钥长度选 HS256 / 384 / 512 以便与 Java 互认 token；bcrypt 超 72 字节返回 400；IPv6 来源地址展开为 Java 格式；`@NotBlank` 用 `String.trim()` 语义；客户端断开不取消事务；ZIP 条目时间戳；Spring Security 默认响应头。
+- 验证：16 个 Java 集成测试逐一移植为 46 个 Go 测试（`internal/app`），连本地 MySQL 8.0 与 Redis 全部通过；生成器模板单元测试与 Java 原版实际渲染逐字节对比一致；`scaffold-go/scripts/compare-backends.py` 用同一库同时跑 Java（Docker）与 Go，管理员 68 个只读接口变体、两个低权限账号各 56 个、匿名 4 个，除上述已知差异外零差异；`scaffold-vue/scripts/session-regression.py` 浏览器回归在 Go 后端通过；Playwright 逐页巡检 11 个页面 1256 次接口调用零错误，并通过界面完成用户 / 岗位的新增与删除、CSV 导出、代码生成导入 → 预览 → ZIP 下载。
+
 ## 2026-10-11（MIT 开源发布）
 
 - 以当前代码建立独立的公开版本快照，采用 MIT License；第三方依赖保留各自许可，README 单独说明 GSAP 许可。

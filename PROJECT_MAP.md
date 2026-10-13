@@ -7,6 +7,7 @@
 | 端 | 路径 | 技术栈 | 本地入口 | 来源 |
 | --- | --- | --- | --- | --- |
 | 后端 | `scaffold-system` | Java 17+、Spring Boot 3.5、MyBatis、MySQL、Redis、JWT | `8080`，接口前缀 `/api` | 已确认 |
+| 后端（Go 版） | `scaffold-go` | Go 1.22+ 标准库 `net/http` + `database/sql`、MySQL、Redis、JWT；模块与 Java 版一一对应（`internal/framework` ↔ common+framework，`internal/system` ↔ system，`internal/generator` ↔ generator，`internal/app` ↔ admin） | `8080`，接口前缀 `/api`，与 Java 版二选一启动 | 已确认 |
 | 管理后台 | `scaffold-vue` | Vue 3、TypeScript、Vite、Vue Router、GSAP，自有组件 | `5173`，开发代理 `/api` | 已确认 |
 
 - Maven 模块：`scaffold-common`、`scaffold-framework`、`scaffold-system`、`scaffold-generator`、`scaffold-admin`。
@@ -123,7 +124,7 @@
 | 改字段 | 初始化或后续迁移 SQL → Mapper 字段别名 → DTO 校验 / Service → API 类型 → 页面表单、表格与导出 |
 | 改外观 / 公共交互 | 样式令牌或公共组件 → 代表性页面 → 浅色 / 深色 / 窄宽度 / 键盘 / 减少动效 |
 | 改认证 | `JwtService`、`TokenStore`、认证过滤器 → `AuthService` → `session.ts`、`http.ts`、`auth.ts`、路由守卫 → 会话回归脚本 |
-| 改生成模板 | `GeneratorService.renderFiles` → 全文件预览 → ZIP 内容 → 菜单 SQL 与当前 schema；骨架接口需业务开发者接入 |
+| 改生成模板 | Java：`GeneratorService.renderFiles`；Go：`scaffold-go/internal/generator/templates.go`（输出 Go 骨架）→ 全文件预览 → ZIP 内容 → 菜单 SQL 与当前 schema；骨架接口需业务开发者接入 |
 
 ## 七、症状定位表
 

@@ -14,6 +14,7 @@
 | 目录 | 用途 | 技术栈 |
 | --- | --- | --- |
 | `scaffold-system` | 后端 Maven 多模块工程 | Java 17+、Spring Boot 3.5、MyBatis、MySQL、Redis、JWT |
+| `scaffold-go` | 后端 Go 等价实现，接口与 `scaffold-system` 完全一致，前端可直接切换 | Go 1.22+ 标准库 `net/http`、`database/sql`、MySQL、Redis、JWT |
 | `scaffold-vue` | 管理后台 | Vue 3、TypeScript、Vite 6、Vue Router 4、GSAP 3，自有组件库 |
 | `scaffold-system/sql` | 首次初始化脚本 | `V1__init_schema.sql` 建表，`V2__seed_data.sql` 初始化数据 |
 | `docs` | 当前架构说明 | 后端架构、前后端接口约定和前端组件架构 |
@@ -54,6 +55,11 @@ java -jar scaffold-admin/target/scaffold-admin-0.1.0-SNAPSHOT.jar
 ```
 
 ```bash
+# 或者启动 Go 版后端（同一套环境变量与数据库，监听同一端口 8080）；详见 scaffold-go/README.md
+cd scaffold-go && go run ./cmd/server
+```
+
+```bash
 # 在 scaffold-vue 目录启动前端；首次使用先 npm ci
 npm run dev
 ```
@@ -71,7 +77,23 @@ npm run dev
 5. 按角色配置菜单和数据范围，验证低权限账号的真实接口拒绝行为、查询、分页、导出及表单校验。
 6. 同步项目地图、相关接口说明和更新日志。
 
-代码生成初始配置为空，按需导入当前数据库的真实表，支持字段信息查看、配置说明保存、7 个文件预览和 ZIP 下载。输出为开发骨架：Controller、Service、Mapper 的业务 CRUD 仍需实现，前端页面需按统一组件规范补齐；下载不会自动写入本工程。
+代码生成初始配置为空，按需导入当前数据库的真实表，支持字段信息查看、配置说明保存、7 个文件预览和 ZIP 下载。Go 版后端输出 Go 骨架（`internal/<module>/` 下的模型、SQL、服务、路由四个文件，已 gofmt）加前端 API、页面占位和菜单 SQL；Java 版仍输出 Controller、Service、Mapper 骨架。两者的业务 CRUD 都仍需实现，前端页面需按统一组件规范补齐；下载不会自动写入本工程。
+
+## 容器部署
+
+`deploy/docker-compose.yml` 一个文件编排 MySQL、Redis、Go 后端和前端（nginx 托管静态文件并把 `/api` 转发到后端）。镜像由 `.github/workflows/docker.yml` 在推送 `main` 或打 `v*` 标签时自动构建并推到 GitHub Container Registry：`ghcr.io/<github 用户名小写>/scaffold-backend` 与 `scaffold-frontend`。
+
+服务器上只需要两个文件：
+
+```bash
+mkdir scaffold && cd scaffold
+# 复制 deploy/docker-compose.yml 和 deploy/.env.example 到这里，后者改名为 .env 并填入 JWT_SECRET、DB_PASSWORD
+docker compose up -d
+```
+
+后端首次启动会自动建库建表并导入种子数据（`DB_AUTO_INIT=true`，脚本幂等）。浏览器访问 `http://<服务器>:<WEB_PORT>`，默认 80 端口。更新版本：改 `.env` 里的 `IMAGE_TAG` 后 `docker compose pull && docker compose up -d`。镜像为私有包时先 `docker login ghcr.io`；在 GitHub 包设置里改为 public 则无需登录。
+
+本地构建镜像：`docker build -f scaffold-go/Dockerfile -t scaffold-backend .`（上下文为仓库根目录）和 `docker build -t scaffold-frontend scaffold-vue`；国内可给后端加 `--build-arg GOPROXY=https://goproxy.cn,direct`。
 
 ## 验证
 
