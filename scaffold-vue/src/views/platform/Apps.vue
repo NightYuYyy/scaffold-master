@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import Icon from '@/components/Icon.vue'
 import { Button, DataTable, Drawer, Field, IconButton, Modal, StatusTag, Switch, Tag, TextInput, type Column } from '@/components/ui'
 import { DictSelect, FormDialog, ListPage, PermissionButton } from '@/components/business'
 import { platformApi, type AppKeyCreated, type AppKeyRow, type AppRow } from '@/api'
 import { useListPage } from '@/composables/list'
-import { ensureAppOptions } from '@/composables/platform'
+import { currentAppId, ensureAppOptions } from '@/composables/platform'
+import { pathOf } from '@/composables/auth'
 import { confirm } from '@/composables/confirm'
 import { pushToast, toastError } from '@/composables/toast'
 import { copyText } from '@/utils/clipboard'
@@ -17,6 +18,13 @@ import { pattern, required, validate } from '@/utils/validate'
    密钥明文只在新建时展示一次。
    ============================================================ */
 const route = useRoute()
+const router = useRouter()
+function openAppPage(row: AppRow, component: string) {
+  const path = pathOf(component)
+  if (!path) return
+  currentAppId.value = row.id
+  router.push(path)
+}
 const list = useListPage<AppRow, { keyword: string; status: string }>({
   query: { keyword: '', status: '' },
   fetch: params => platformApi.apps.list(params),
@@ -31,6 +39,7 @@ const columns: Column[] = [
   { key: 'userCount', title: '用户数', width: 96, align: 'right' },
   { key: 'keyCount', title: '密钥数', width: 96, align: 'right' },
   { key: 'createTime', title: '创建时间', width: 150 },
+  { key: 'manage', title: '应用数据', width: 170 },
   { key: 'actions', title: '操作', width: 170, className: 'col-actions' },
 ]
 
@@ -250,6 +259,12 @@ onMounted(() => { if (route.query.create === '1') openCreate() })
     <template #cell-userCount="{ row }"><span class="tnum">{{ row.userCount }}</span></template>
     <template #cell-keyCount="{ row }"><span class="tnum">{{ row.keyCount }}</span></template>
     <template #cell-createTime="{ row }"><span class="tnum soft">{{ row.createTime }}</span></template>
+    <template #cell-manage="{ row }">
+      <div class="row-actions">
+        <PermissionButton v-if="pathOf('platform/user/index')" perm="platform:user:list" variant="text" size="sm" @click="openAppPage(row, 'platform/user/index')">管理用户</PermissionButton>
+        <PermissionButton v-if="pathOf('platform/field/index')" perm="platform:field:list" variant="text" size="sm" @click="openAppPage(row, 'platform/field/index')">配置字段</PermissionButton>
+      </div>
+    </template>
     <template #cell-actions="{ row }">
       <div class="row-actions">
         <PermissionButton perm="platform:appkey:list" icon-only icon="key" label="密钥" @click="openKeys(row)" />

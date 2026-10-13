@@ -1,33 +1,47 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Field, Select, Tag, TextInput, type Column } from '@/components/ui'
-import { ListPage } from '@/components/business'
+import { AppContext, ListPage } from '@/components/business'
 import { platformApi, type AppFieldRow, type CounterLogRow } from '@/api'
 import { useListPage } from '@/composables/list'
 import { useAppSelect } from '@/composables/platform'
 
 /* 账户流水：某个应用全部数值账户的加减记录；refNo 幂等号可用来对账。 */
 const route = useRoute()
-const app = useAppSelect('counterLogs', async (id) => {
-  list.query.appId = id
+let scopeVersion = 0
+onScopeDispose(() => { scopeVersion++ })
+const app = useAppSelect(async (id, previous) => {
+  const version = ++scopeVersion
+  list.clear()
   list.query.fieldKey = ''
-  if (!id) { list.rows.value = []; list.total.value = 0; return }
+  if (previous !== undefined) list.query.userId = ''
+  counters.value = []
+  counterOptions.value = [{ label: '全部账户', value: '' }]
+  if (!id) return
   try {
-    counters.value = (await platformApi.fields.list(id)).filter(f => f.type === 'counter')
+    const fields = await platformApi.fields.list(id)
+    if (version !== scopeVersion) return
+    counters.value = fields.filter(f => f.type === 'counter')
   } catch {
+    if (version !== scopeVersion) return
     counters.value = []
   }
   counterOptions.value = [{ label: '全部账户', value: '' }, ...counters.value.map(f => ({ label: f.label, value: f.key }))]
   list.search()
 })
-const list = useListPage<CounterLogRow, { appId: number | null; userId: string; fieldKey: string; keyword: string }>({
-  query: { appId: null, userId: typeof route.query.userId === 'string' ? route.query.userId : '', fieldKey: '', keyword: '' },
-  fetch: params => platformApi.counterLogs.list(params),
-  exporter: params => platformApi.counterLogs.export(params),
+const list = useListPage<CounterLogRow, { userId: string; fieldKey: string; keyword: string }>({
+  query: { userId: '', fieldKey: '', keyword: '' },
+  toParams: query => ({ ...query, appId: app.appId.value }),
+  fetch: async params => params.appId ? platformApi.counterLogs.list(params) : { rows: [], total: 0, pageNum: 1, pageSize: 10 },
+  exporter: params => {
+    if (!params.appId) throw new Error('请先选择应用')
+    return platformApi.counterLogs.export(params)
+  },
   exportName: '账户流水.csv',
   immediate: false,
 })
+if (typeof route.query.userId === 'string') list.query.userId = route.query.userId
 
 const columns: Column[] = [
   { key: 'username', title: '用户', minWidth: 160 },
@@ -47,10 +61,8 @@ const labelOf = (key: string) => counters.value.find(f => f.key === key)?.label 
 
 <template>
   <ListPage title="账户流水" desc="数值账户的每一笔加减：来自开放接口的业务变动与后台的人工调整。" table-title="流水记录" :list="list" :columns="columns" :min-width="1080">
+    <template #before><AppContext /></template>
     <template #search>
-      <Field label="应用">
-        <Select v-model="app.appId.value" :options="app.options.value" placeholder="选择应用" filterable empty-text="没有可见的应用" />
-      </Field>
       <Field label="账户">
         <Select v-model="list.query.fieldKey" :options="counterOptions" />
       </Field>

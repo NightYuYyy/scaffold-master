@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { Field, Select, StatusTag, Switch, Tag, TextInput, type Column } from '@/components/ui'
-import { DictSelect, DictTag, FormDialog, ListPage, PermissionButton } from '@/components/business'
-import { platformApi, type AppFieldRow, type AppFieldType } from '@/api'
+import { AppContext, DictSelect, DictTag, FormDialog, ListPage, PermissionButton } from '@/components/business'
+import { platformApi, type AppFieldRow, type AppFieldType, type AppOption } from '@/api'
 import { useListPage } from '@/composables/list'
 import { counterRule, enumOptions, FIELD_TYPE_LABEL, useAppSelect } from '@/composables/platform'
 import { confirm } from '@/composables/confirm'
@@ -13,13 +13,14 @@ import { pattern, required, validate } from '@/utils/validate'
    字段配置：运营给某个应用定义的用户资料字段与数值账户。
    键与类型创建后不可改；数值账户不允许用户自改。
    ============================================================ */
-const app = useAppSelect('fields', (id) => {
-  list.query.appId = id
+const app = useAppSelect((id) => {
+  list.clear()
+  dialog.value = false
   if (id) list.search()
-  else { list.rows.value = []; list.total.value = 0 }
 })
-const list = useListPage<AppFieldRow, { appId: number | null; keyword: string }>({
-  query: { appId: null, keyword: '' },
+const list = useListPage<AppFieldRow, { keyword: string }>({
+  query: { keyword: '' },
+  toParams: query => ({ ...query, appId: app.appId.value }),
   fetch: async (params) => {
     if (!params.appId) return { rows: [], total: 0, pageNum: 1, pageSize: 1 }
     const key = String(params.keyword ?? '').toLowerCase()
@@ -69,6 +70,7 @@ interface FieldForm {
 }
 const emptyForm = (): FieldForm => ({ key: '', label: '', type: 'string', required: false, userEditable: false, defaultValue: '', optionsText: '', allowNegative: false, max: null, sort: (list.rows.value.length + 1) * 10, status: 1, remark: '' })
 const dialog = ref(false)
+const formApp = ref<AppOption | null>(null)
 const saving = ref(false)
 const form = reactive<FieldForm>(emptyForm())
 const errors = ref<Partial<Record<keyof FieldForm, string>>>({})
@@ -79,12 +81,16 @@ const enumChoices = computed(() => parsedOptions.value.map(v => ({ label: v, val
 watch(() => form.type, (type) => { if (type === 'counter') form.userEditable = false })
 
 function openCreate() {
+  if (!app.current.value) return
+  formApp.value = app.current.value
   Object.assign(form, emptyForm(), { id: undefined })
   errors.value = {}
   dialog.value = true
 }
 
 function openEdit(row: AppFieldRow) {
+  if (row.appId !== app.appId.value) return
+  formApp.value = app.current.value
   const rule = counterRule(row)
   Object.assign(form, {
     id: row.id, key: row.key, label: row.label, type: row.type,
@@ -98,6 +104,7 @@ function openEdit(row: AppFieldRow) {
 }
 
 async function submit() {
+  if (!formApp.value || formApp.value.id !== app.appId.value) return
   errors.value = validate(form, {
     key: [required('请输入字段键'), pattern(/^[A-Za-z][A-Za-z0-9_]{0,63}$/, '字母开头，1–64 位字母、数字、下划线')],
     label: [required('请输入字段名称')],
@@ -118,7 +125,7 @@ async function submit() {
       await platformApi.fields.update(form.id, payload)
       pushToast('字段已更新')
     } else {
-      await platformApi.fields.create({ ...payload, appId: app.appId.value!, key: form.key.trim(), type: form.type })
+      await platformApi.fields.create({ ...payload, appId: formApp.value.id, key: form.key.trim(), type: form.type })
       pushToast('字段已新增')
     }
     dialog.value = false
@@ -156,10 +163,9 @@ async function remove(row: AppFieldRow) {
       <PermissionButton perm="platform:field:add" variant="primary" icon="plus" :disabled="!app.appId.value" @click="openCreate">新增字段</PermissionButton>
     </template>
 
+    <template #before><AppContext /></template>
+
     <template #search>
-      <Field label="应用">
-        <Select v-model="app.appId.value" :options="app.options.value" placeholder="选择应用" filterable empty-text="没有可见的应用" />
-      </Field>
       <Field label="关键词" wide>
         <TextInput v-model="list.query.keyword" icon="search" placeholder="字段键 / 名称" clearable @enter="list.search()" />
       </Field>
@@ -185,7 +191,8 @@ async function remove(row: AppFieldRow) {
       </div>
     </template>
 
-    <FormDialog :open="dialog" :title="isEdit ? '编辑字段' : '新增字段'" :sub="app.current.value?.name" :saving="saving" @close="dialog = false" @submit="submit">
+    <FormDialog :open="dialog" :title="isEdit ? '编辑字段' : '新增字段'" :saving="saving" @close="dialog = false" @submit="submit">
+      <AppContext readonly :bound-app="formApp" />
       <Field label="字段键" required :error="errors.key" :hint="isEdit ? '创建后不可修改' : '接口里的字段名，如 inviteCode'">
         <TextInput v-model="form.key" placeholder="字母开头" :disabled="isEdit" :invalid="!!errors.key" autocomplete="off" />
       </Field>

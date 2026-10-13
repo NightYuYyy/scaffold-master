@@ -56,6 +56,10 @@
 
 **接入一个新项目**：控制台「应用管理」新建应用 → 「密钥」新增密钥（secret 只显示一次）→ 「字段配置」加字段 → 业务前端带 `X-App-Key` 调 `/open/v1/auth/register`、`/auth/login` → 业务后端用 `api_secret` 本地验签 token，或带 `X-App-Secret` 调 `/open/v1/users/*`。
 
+**管理某个应用的数据**：「应用管理」行内「管理用户 / 配置字段」→ `pathOf` 解析当前账号可访问的页面 → `currentAppId` 切到对应应用。用户 / 字段 / 流水 / 认证日志页复用 `AppContext` 与 `useAppSelect`，一次只看一个应用，跨页共享选择。查询参数由 `toParams` 注入当前 `appId`，重置不改变应用；切换先 `useListPage.clear()` 清空旧行并使旧请求失效，字段加载另校验切换版本。新增 / 编辑表单固定所属应用，换应用关闭旧表单。
+
+**应用上下文回归**：`scaffold-vue/scripts/platform-context-regression.py` 自建 A（余额）/ B（机器码），验证跨页 / 刷新、重置 / 导出、表单绑定、慢请求、应用管理入口、无应用状态及换账号清理；支持 `--base-url` 和 `--screenshots`。夹具通过正式接口清理，不清空任何表。
+
 **用户注册**：`POST /open/v1/auth/register` → 校验应用状态、`allow_register`、验证码、账号规则、字段定义（用户可编辑 / 必填 / 类型 / 枚举）→ 写 `app_user`（`profile`）→ 签发 token（Redis `open:token:<jti>` 与只延长 TTL 的用户撤销索引）→ 写 `app_auth_log` → 返回 `{ token, expiresIn, user }`。
 
 **积分加减**：业务后端 `POST /open/v1/users/{id}/counters/coins/change { amount, reason, refNo }` → 事务内锁 `app_counter` 行 → 校验幂等号、余额下限与上限 → 更新余额 → 写 `app_counter_log` → 返回 `{ balance, logId, duplicated }`。
@@ -84,6 +88,7 @@
 | 扩展字段类型 | `app_field.field_type` 校验（`fields.go`）→ `/me` 与管理接口的 profile 规范化 → 控制台动态列与表单（`AppUsers.vue`、`Fields.vue`）→ 字典 `app_field_type` |
 | 账户规则 | `counters.go`（锁、幂等、下限上限）→ 流水页与导出 → 工作台 `counters` |
 | 应用范围 | `sys_user_app` → `internal/platform/scope.go` → 每个平台查询与写入 → 后台账号页「可管理的应用」 |
+| 当前应用交互 | `composables/platform.ts` → `AppContext.vue` → 4 个应用级列表的 `toParams` 与新增 / 编辑表单 → `platform-context-regression.py` |
 | 改权限 | `sql/V2` 菜单与权限码 → `sec.Perm` → `PermissionButton` → 低权限账号回归 |
 | 改表 | `sql/V1`（幂等）→ SQL 别名 → DTO → 契约文档 → 页面 |
 | 改部署 | `scaffold-go/Dockerfile`、`scaffold-vue/Dockerfile` / `nginx.conf.template`、`deploy/docker-compose.yml`、`.github/workflows/docker.yml` → 本地 compose 验证 |

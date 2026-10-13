@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Avatar, DataTable, Drawer, Field, Select, StatusTag, Switch, Tag, TextInput, type Column } from '@/components/ui'
-import { DictSelect, FormDialog, ListPage, PermissionButton } from '@/components/business'
-import { platformApi, type AppFieldRow, type AppUserRow, type CounterLogRow } from '@/api'
+import { AppContext, DictSelect, FormDialog, ListPage, PermissionButton } from '@/components/business'
+import { platformApi, type AppFieldRow, type AppOption, type AppUserRow, type CounterLogRow } from '@/api'
 import { useListPage } from '@/composables/list'
 import { counterRule, enumOptions, fieldInput, fieldOutput, fieldText, useAppSelect } from '@/composables/platform'
 import { confirm } from '@/composables/confirm'
@@ -16,13 +16,30 @@ import { pattern, required, validate } from '@/utils/validate'
    数值账户只能通过「账户调整」加减，不能直接改值。
    ============================================================ */
 const route = useRoute()
-const app = useAppSelect('appUsers', async (id) => {
-  list.query.appId = id
-  if (!id) { fields.value = []; list.rows.value = []; list.total.value = 0; return }
-  await loadFields()
-  list.search()
-})
 const fields = ref<AppFieldRow[]>([])
+const fieldsReady = ref(false)
+let scopeVersion = 0
+onScopeDispose(() => { scopeVersion++ })
+const app = useAppSelect(async (id) => {
+  const version = ++scopeVersion
+  list.clear()
+  fields.value = []
+  fieldsReady.value = false
+  dialog.value = false
+  resetTarget.value = null
+  adjustTarget.value = null
+  detail.value = null
+  if (!id) return
+  try {
+    const rows = await platformApi.fields.list(id)
+    if (version !== scopeVersion) return
+    fields.value = rows
+    fieldsReady.value = true
+    await list.search()
+  } catch (error) {
+    if (version === scopeVersion) toastError(error, '字段配置加载失败')
+  }
+})
 const enabledFields = computed(() => fields.value.filter(f => f.status === 1))
 const profileFields = computed(() => enabledFields.value.filter(f => f.type !== 'counter'))
 const counterFields = computed(() => enabledFields.value.filter(f => f.type === 'counter'))
@@ -32,13 +49,18 @@ const fieldCol = (f: AppFieldRow) => `f_${f.key}`
 type Row = AppUserRow & Record<string, unknown>
 const decorate = (row: AppUserRow): Row => Object.assign({ ...row }, Object.fromEntries(enabledFields.value.map(f => [fieldCol(f), fieldText(f, row.profile, row.counters)])))
 
-const list = useListPage<Row, { appId: number | null; keyword: string; status: string }>({
-  query: { appId: null, keyword: '', status: '' },
+const list = useListPage<Row, { keyword: string; status: string }>({
+  query: { keyword: '', status: '' },
+  toParams: query => ({ ...query, appId: app.appId.value }),
   fetch: async params => {
+    if (!params.appId || !fieldsReady.value) return { rows: [], total: 0, pageNum: 1, pageSize: 10 }
     const page = await platformApi.users.list(params)
     return { ...page, rows: page.rows.map(decorate) }
   },
-  exporter: params => platformApi.users.export(params),
+  exporter: params => {
+    if (!params.appId) throw new Error('请先选择应用')
+    return platformApi.users.export(params)
+  },
   exportName: '应用用户.csv',
   immediate: false,
 })
@@ -52,16 +74,6 @@ const columns = computed<Column[]>(() => [
   { key: 'actions', title: '操作', width: 200, className: 'col-actions' },
 ])
 
-async function loadFields() {
-  if (!app.appId.value) { fields.value = []; return }
-  try {
-    fields.value = await platformApi.fields.list(app.appId.value)
-  } catch (error) {
-    fields.value = []
-    toastError(error, '字段配置加载失败')
-  }
-}
-
 onMounted(async () => {
   await app.ready
   if (route.query.create === '1' && app.appId.value) openCreate()
@@ -71,6 +83,7 @@ onMounted(async () => {
 interface UserForm { id?: number; username: string; password: string; nickname: string; avatar: string; status: number; profile: Record<string, unknown> }
 const emptyForm = (): UserForm => ({ username: '', password: '', nickname: '', avatar: '', status: 1, profile: {} })
 const dialog = ref(false)
+const formApp = ref<AppOption | null>(null)
 const saving = ref(false)
 const form = reactive<UserForm>(emptyForm())
 const errors = ref<Record<string, string>>({})
@@ -81,6 +94,8 @@ function fillProfile(source?: Record<string, unknown>) {
 }
 
 function openCreate() {
+  if (!app.current.value || !fieldsReady.value) return
+  formApp.value = app.current.value
   Object.assign(form, emptyForm(), { id: undefined })
   fillProfile()
   errors.value = {}
@@ -88,6 +103,8 @@ function openCreate() {
 }
 
 function openEdit(row: AppUserRow) {
+  if (row.appId !== app.appId.value || !fieldsReady.value) return
+  formApp.value = app.current.value
   Object.assign(form, { id: row.id, username: row.username, password: '', nickname: row.nickname, avatar: row.avatar ?? '', status: row.status })
   fillProfile(row.profile ?? {})
   errors.value = {}
@@ -104,6 +121,7 @@ function profilePayload() {
 }
 
 async function submit() {
+  if (!formApp.value || formApp.value.id !== app.appId.value) return
   const base = isEdit.value
     ? validate(form, { nickname: [required('请输入昵称')] })
     : validate(form, {
@@ -124,7 +142,7 @@ async function submit() {
       pushToast('用户资料已更新')
     } else {
       await platformApi.users.create({
-        appId: app.appId.value!, username: form.username.trim(), password: form.password || undefined,
+        appId: formApp.value.id, username: form.username.trim(), password: form.password || undefined,
         nickname: form.nickname.trim() || undefined, status: form.status, profile: profilePayload(),
       })
       pushToast('用户已新增')
@@ -246,20 +264,23 @@ const logColumns: Column[] = [
 const fieldLabel = (key: string) => fields.value.find(f => f.key === key)?.label ?? key
 
 async function loadDetail(id: number) {
+  const version = scopeVersion
+  const appId = app.appId.value
   detailLoading.value = true
   try {
     const [user, logs] = await Promise.all([
       platformApi.users.get(id),
-      platformApi.counterLogs.list({ appId: app.appId.value, userId: id, pageNum: 1, pageSize: 10 }),
+      platformApi.counterLogs.list({ appId, userId: id, pageNum: 1, pageSize: 10 }),
     ])
+    if (version !== scopeVersion || detail.value?.id !== id) return
     detail.value = user
     detailLogs.value = logs.rows
     await nextTick()
     revealCascade(detailBody.value)
   } catch (error) {
-    toastError(error, '用户详情加载失败')
+    if (version === scopeVersion) toastError(error, '用户详情加载失败')
   } finally {
-    detailLoading.value = false
+    if (version === scopeVersion) detailLoading.value = false
   }
 }
 function openDetail(row: AppUserRow) {
@@ -272,13 +293,12 @@ function openDetail(row: AppUserRow) {
 <template>
   <ListPage title="应用用户" desc="各应用的终端用户，按应用隔离；资料字段与数值账户随该应用的字段配置变化。" table-title="用户列表" :list="list" :columns="columns" :min-width="960">
     <template #actions>
-      <PermissionButton perm="platform:user:add" variant="primary" icon="plus" :disabled="!app.appId.value" @click="openCreate">新增用户</PermissionButton>
+      <PermissionButton perm="platform:user:add" variant="primary" icon="plus" :disabled="!app.appId.value || !fieldsReady" @click="openCreate">新增用户</PermissionButton>
     </template>
 
+    <template #before><AppContext /></template>
+
     <template #search>
-      <Field label="应用">
-        <Select v-model="app.appId.value" :options="app.options.value" placeholder="选择应用" filterable empty-text="没有可见的应用" />
-      </Field>
       <Field label="关键词" wide>
         <TextInput v-model="list.query.keyword" icon="search" placeholder="账号 / 昵称" clearable @enter="list.search()" />
       </Field>
@@ -310,7 +330,8 @@ function openDetail(row: AppUserRow) {
       </div>
     </template>
 
-    <FormDialog :open="dialog" :title="isEdit ? '编辑用户' : '新增用户'" :sub="app.current.value?.name" :saving="saving" @close="dialog = false" @submit="submit">
+    <FormDialog :open="dialog" :title="isEdit ? '编辑用户' : '新增用户'" :saving="saving" @close="dialog = false" @submit="submit">
+      <AppContext readonly :bound-app="formApp" />
       <template v-if="!isEdit">
         <Field label="账号" required :error="errors.username" hint="应用内唯一，3–64 位字母、数字或 _ . @ -">
           <TextInput v-model="form.username" :invalid="!!errors.username" autocomplete="off" />

@@ -1,64 +1,79 @@
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { platformApi, type AppFieldRow, type AppOption } from '@/api'
 import { sessionVersion } from './auth'
 import { toastError } from './toast'
 
 /* ============================================================
    平台页面共用：可见应用列表（按账号范围由后端过滤）与「当前应用」选择。
-   选中的应用按页面记在本机；账号切换后清空。
+   所有平台页面共用当前应用；刷新时恢复，账号切换后清空。
    ============================================================ */
 export const appOptions = ref<AppOption[]>([])
+const STORAGE_KEY = 'scaffold.app.current'
+export const currentAppId = ref<number | null>(null)
+try {
+  const saved = Number(localStorage.getItem(STORAGE_KEY))
+  if (Number.isSafeInteger(saved) && saved > 0) currentAppId.value = saved
+} catch { /* 存储不可用时由可见应用列表选择默认项 */ }
+watch(currentAppId, (id) => {
+  try {
+    if (id) localStorage.setItem(STORAGE_KEY, String(id))
+    else localStorage.removeItem(STORAGE_KEY)
+  } catch { /* 存储不可用不影响当前会话 */ }
+}, { flush: 'sync' })
 let loaded: Promise<AppOption[]> | null = null
+let requestId = 0
 
 export function ensureAppOptions(force = false) {
   if (!force && loaded) return loaded
   const version = sessionVersion.value
+  const request = ++requestId
   loaded = platformApi.apps.options()
     .then((rows) => {
-      if (version === sessionVersion.value) appOptions.value = rows
+      if (version !== sessionVersion.value || request !== requestId) return []
+      appOptions.value = rows
+      if (!rows.some(a => a.id === currentAppId.value)) currentAppId.value = rows[0]?.id ?? null
       return rows
     })
     .catch((error) => {
-      loaded = null
-      toastError(error, '应用列表加载失败')
+      if (version === sessionVersion.value && request === requestId) {
+        loaded = null
+        appOptions.value = []
+        currentAppId.value = null
+        toastError(error, '应用列表加载失败')
+      }
       return [] as AppOption[]
     })
   return loaded
 }
 
 watch(sessionVersion, () => {
+  requestId++
   loaded = null
   appOptions.value = []
-})
+  currentAppId.value = null
+}, { flush: 'sync' })
 
 /**
  * 当前应用选择。onChange 在选项到位、appId 落到一个可见应用后调用一次，之后每次切换再调用；
  * 页面在这里取数即可，不必自己区分「首次」与「切换」。
  */
-export function useAppSelect(page: string, onChange?: (appId: number | null) => void) {
-  const storageKey = `scaffold.app.${page}`
-  let saved: number | null = null
-  try {
-    const raw = localStorage.getItem(storageKey)
-    if (raw) saved = Number(raw)
-  } catch {
-    // 存储不可用时从第一个应用开始
-  }
-  const appId = ref<number | null>(saved)
+export function useAppSelect(onChange?: (appId: number | null, previous?: number | null) => void | Promise<void>) {
+  const version = sessionVersion.value
+  let active = true
   let settled = false
-  const ready = ensureAppOptions().then((rows) => {
-    if (!rows.some(a => a.id === appId.value)) appId.value = rows[0]?.id ?? null
+  onScopeDispose(() => { active = false })
+  const ready = ensureAppOptions().then(async () => {
+    if (!active || version !== sessionVersion.value) return
     settled = true
-    onChange?.(appId.value)
+    await onChange?.(currentAppId.value)
   })
-  // flush: sync 保证 ready 里的赋值不会再触发一次 onChange
-  watch(appId, (value) => {
-    try { if (value) localStorage.setItem(storageKey, String(value)) } catch { /* 忽略 */ }
-    if (settled) onChange?.(value)
+  // 切换时同步清除页面旧数据，避免新应用标题下短暂展示上个应用的记录。
+  watch(currentAppId, (value, previous) => {
+    if (settled && active) onChange?.(value, previous)
   }, { flush: 'sync' })
   const options = computed(() => appOptions.value.map(a => ({ label: a.name, value: a.id, hint: a.code })))
-  const current = computed(() => appOptions.value.find(a => a.id === appId.value) ?? null)
-  return { appId, options, current, ready }
+  const current = computed(() => appOptions.value.find(a => a.id === currentAppId.value) ?? null)
+  return { appId: currentAppId, options, current, ready }
 }
 
 /* ── 扩展字段的值：列表展示与表单输入共用 ── */

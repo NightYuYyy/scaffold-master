@@ -1,20 +1,23 @@
 <script setup lang="ts">
 import { Field, Select, Tag, TextInput, type Column } from '@/components/ui'
-import { ListPage } from '@/components/business'
+import { AppContext, ListPage } from '@/components/business'
 import { platformApi, type AuthLogRow } from '@/api'
 import { useListPage } from '@/composables/list'
 import { useAppSelect } from '@/composables/platform'
 
 /* 认证日志：应用用户的注册、登录、登出、刷新及失败记录（含来源 IP）。 */
-const app = useAppSelect('authLogs', (id) => {
-  list.query.appId = id
+const app = useAppSelect((id) => {
+  list.clear()
   if (id) list.search()
-  else { list.rows.value = []; list.total.value = 0 }
 })
-const list = useListPage<AuthLogRow, { appId: number | null; event: string; status: string; keyword: string }>({
-  query: { appId: null, event: '', status: '', keyword: '' },
-  fetch: params => platformApi.authLogs.list(params),
-  exporter: params => platformApi.authLogs.export(params),
+const list = useListPage<AuthLogRow, { event: string; status: string; keyword: string }>({
+  query: { event: '', status: '', keyword: '' },
+  toParams: query => ({ ...query, appId: app.appId.value }),
+  fetch: async params => params.appId ? platformApi.authLogs.list(params) : { rows: [], total: 0, pageNum: 1, pageSize: 10 },
+  exporter: params => {
+    if (!params.appId) throw new Error('请先选择应用')
+    return platformApi.authLogs.export(params)
+  },
   exportName: '认证日志.csv',
   immediate: false,
 })
@@ -35,10 +38,8 @@ const STATUSES = [{ label: '全部结果', value: '' }, { label: '成功', value
 
 <template>
   <ListPage title="认证日志" desc="应用用户的注册、登录、登出与刷新记录，失败记录可用于发现撞库与异常来源。" table-title="认证记录" :list="list" :columns="columns" :min-width="900">
+    <template #before><AppContext /></template>
     <template #search>
-      <Field label="应用">
-        <Select v-model="app.appId.value" :options="app.options.value" placeholder="选择应用" filterable empty-text="没有可见的应用" />
-      </Field>
       <Field label="事件">
         <Select v-model="list.query.event" :options="EVENTS" />
       </Field>

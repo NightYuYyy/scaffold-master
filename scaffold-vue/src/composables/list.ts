@@ -1,4 +1,4 @@
-import { reactive, ref, shallowRef, type Ref } from 'vue'
+import { onScopeDispose, reactive, ref, shallowRef, type Ref } from 'vue'
 import type { PageResult, QueryParams } from '@/api'
 import { downloadBlob } from '@/utils/download'
 import { pushToast, toastError } from './toast'
@@ -32,6 +32,16 @@ export function useListPage<Row extends Record<string, any>, Query extends Recor
   const exporting = ref(false)
   const selected = ref<(string | number)[]>([])
   let requestId = 0
+  onScopeDispose(() => { requestId++ })
+
+  function clear() {
+    requestId++
+    rows.value = []
+    total.value = 0
+    selected.value = []
+    page.value = 1
+    loading.value = false
+  }
 
   function params(): QueryParams {
     const source = options.toParams ? options.toParams(query) : (query as QueryParams)
@@ -102,7 +112,7 @@ export function useListPage<Row extends Record<string, any>, Query extends Recor
 
   return {
     query, rows, total, page, pageSize, loading, exporting, selected,
-    load, search, reset, setPage, setPageSize, exportData,
+    load, search, reset, clear, setPage, setPageSize, exportData,
     canExport: Boolean(options.exporter),
   }
 }
@@ -120,6 +130,7 @@ export interface ListPageState {
   load: () => Promise<void>
   search: () => Promise<void>
   reset: () => Promise<void>
+  clear: () => void
   setPage: (value: number) => Promise<void>
   setPageSize: (value: number) => Promise<void>
   exportData: () => Promise<void>
