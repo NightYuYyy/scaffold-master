@@ -4,6 +4,7 @@
 .vscode/
 .cursor/
 .claude/
+.omc/
 .npm-cache/
 .cache/
 **/.env
